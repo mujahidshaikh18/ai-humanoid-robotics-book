@@ -74,6 +74,33 @@ We welcome contributions to improve this educational resource. Please feel free 
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## 🌐 GitHub Pages Deployment
+
+The site is deployed to GitHub Pages at: https://mujahidshaikh18.github.io/ai-humanoid-robotics-book/
+
+### Deployment Process
+
+The site is automatically deployed using GitHub Actions. When changes are pushed to the main branch, the workflow in `.github/workflows/deploy.yml` will:
+1. Build the Docusaurus site
+2. Deploy the static files to the `gh-pages` branch
+3. Update the GitHub Pages site
+
+### Manual Deployment (if needed)
+
+If you need to deploy manually, run:
+
+```bash
+npm run build
+npm run deploy
+```
+
+### GitHub Pages Settings
+
+Make sure GitHub Pages is configured in your repository settings:
+1. Go to Settings → Pages
+2. Source should be set to "Deploy from a branch"
+3. Branch should be "gh-pages" with "/ (root)" folder
+
 ## 📚 Academic References
 
 This textbook adheres to strict academic standards with:
