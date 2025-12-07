@@ -9,7 +9,7 @@ const config = {
   favicon: 'img/favicon.ico',
 
   // Set the production url of your site here
-  url: 'https://mujahidshaikh18.github.io/ai-humanoid-robotics-book/',
+  url: 'https://mujahidshaikh18.github.io',
   // Set the /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
   baseUrl: '/ai-humanoid-robotics-book/',
@@ -21,6 +21,7 @@ const config = {
 
   onBrokenLinks: 'throw',
   onBrokenMarkdownLinks: 'warn',
+  trailingSlash: false,
 
   // Even if you don't use internationalization, you can use this field to set
   // useful metadata like html lang. For example, if your site is Chinese, you
