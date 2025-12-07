@@ -68,7 +68,7 @@ const config = {
             label: 'Modules',
           },
           {
-            href: 'https://github.com/your-organization/ai-humanoid-robotics-book',
+            href: 'https://github.com/mujahidshaikh18/ai-humanoid-robotics-book',
             label: 'GitHub',
             position: 'right',
           },
