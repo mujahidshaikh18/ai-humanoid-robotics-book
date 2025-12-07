@@ -1,0 +1,659 @@
+---
+sidebar_position: 7
+title: 'Chapter 7: Gazebo for Humanoid Physics'
+---
+
+# Gazebo for Humanoid Physics
+
+## Overview
+
+Gazebo is a powerful 3D simulation environment that provides accurate physics simulation for robotics applications. For humanoid robots, Gazebo offers sophisticated physics modeling capabilities that are essential for realistic simulation of complex multi-joint systems with intricate kinematics and dynamics.
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+- Configure Gazebo for humanoid robot simulation
+- Understand physics engines and their parameters
+- Implement realistic humanoid physics models
+- Tune simulation parameters for accuracy
+- Integrate Gazebo with ROS 2 for humanoid control
+
+## Introduction to Gazebo
+
+Gazebo is an open-source robotics simulator that provides high-fidelity physics simulation, realistic rendering, and convenient programmatic interfaces. It's widely used in robotics research and development for testing algorithms, training AI models, and validating robot designs before deployment on physical hardware.
+
+### Key Features of Gazebo
+
+1. **Physics Simulation**: Accurate modeling of rigid body dynamics
+2. **Sensor Simulation**: Realistic simulation of various robot sensors
+3. **Rendering**: High-quality 3D visualization with OpenGL
+4. **Plugins**: Extensible architecture for custom functionality
+5. **ROS Integration**: Seamless integration with ROS and ROS 2
+
+### Gazebo Architecture
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   GUI Client   │    │   Server        │    │   Physics       │
+│   (gzclient)   │◄──►│   (gzserver)    │◄──►│   Engine        │
+│                │    │                 │    │   (ODE, Bullet, │
+│ - Visualization│    │ - World         │    │   DART, Simbody)│
+│ - Controls     │    │ - Models        │    │                 │
+│ - Plugins      │    │ - Sensors       │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+## Physics Engines in Gazebo
+
+Gazebo supports multiple physics engines, each with different characteristics:
+
+### ODE (Open Dynamics Engine)
+- Default physics engine for Gazebo
+- Good performance for most applications
+- Stable for rigid body simulations
+- Well-tested and mature
+
+### Bullet
+- Fast and robust physics engine
+- Good for complex contact scenarios
+- Supports soft body simulation
+- Used in many game engines
+
+### DART (Dynamic Animation and Robotics Toolkit)
+- Advanced dynamics and kinematics
+- Better for complex articulated systems
+- Supports hybrid dynamics
+- Good for humanoid robots
+
+### Simbody
+- Multibody dynamics engine
+- High accuracy for complex systems
+- Good for biomechanical simulations
+- Less commonly used
+
+## Setting Up Gazebo for Humanoid Simulation
+
+### Installation and Configuration
+
+```bash
+# Install Gazebo (Harmonic version for ROS 2 Humble)
+sudo apt install ros-humble-gazebo-ros-pkgs
+
+# Or for other ROS 2 versions
+sudo apt install ros-<ros2-distro>-gazebo-ros-pkgs
+```
+
+### Basic Gazebo Launch File
+
+```xml
+<?xml version="1.0"?>
+<launch>
+  <!-- Start Gazebo with empty world -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch.py">
+    <arg name="world" value="$(find my_robot_description)/worlds/my_world.world"/>
+    <arg name="paused" value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui" value="true"/>
+    <arg name="headless" value="false"/>
+    <arg name="debug" value="false"/>
+  </include>
+
+  <!-- Spawn robot in Gazebo -->
+  <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_entity.py"
+        args="-entity my_humanoid -file $(find my_robot_description)/urdf/my_humanoid.urdf"
+        output="screen"/>
+</launch>
+```
+
+## Physics Configuration for Humanoid Robots
+
+### World File Configuration
+
+```xml
+<?xml version="1.0" ?>
+<sdf version="1.7">
+  <world name="humanoid_world">
+    <!-- Physics engine configuration -->
+    <physics name="1ms" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+      <gravity>0 0 -9.8</gravity>
+
+      <!-- ODE-specific parameters -->
+      <ode>
+        <solver>
+          <type>quick</type>
+          <iters>10</iters>
+          <sor>1.3</sor>
+        </solver>
+        <constraints>
+          <cfm>0.0</cfm>
+          <erp>0.2</erp>
+          <contact_max_correcting_vel>100.0</contact_max_correcting_vel>
+          <contact_surface_layer>0.001</contact_surface_layer>
+        </constraints>
+      </ode>
+    </physics>
+
+    <!-- Include ground plane -->
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <!-- Include sun -->
+    <include>
+      <uri>model://sun</uri>
+    </include>
+  </world>
+</sdf>
+```
+
+### Physics Parameters Explained
+
+- **max_step_size**: Simulation time step (smaller = more accurate but slower)
+- **real_time_factor**: Target simulation speed relative to real time
+- **real_time_update_rate**: Update rate in Hz (1/max_step_size)
+- **gravity**: Gravitational acceleration vector
+- **solver iterations**: More iterations = more stable but slower
+- **CFM (Constraint Force Mixing)**: Constraint stiffness
+- **ERP (Error Reduction Parameter)**: Error correction rate
+
+## Humanoid-Specific Physics Considerations
+
+### Center of Mass and Stability
+
+For humanoid robots, proper center of mass (CoM) placement is crucial for stable simulation:
+
+```xml
+<link name="torso">
+  <inertial>
+    <!-- CoM should be within the support polygon for stability -->
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <mass value="10.0"/>
+    <!-- Proper inertia tensor for humanoid torso -->
+    <inertia ixx="0.5" ixy="0.0" ixz="0.0"
+             iyy="0.6" iyz="0.0" izz="0.2"/>
+  </inertial>
+
+  <visual>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <box size="0.3 0.2 0.5"/>
+    </geometry>
+  </visual>
+
+  <collision>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <box size="0.3 0.2 0.5"/>
+    </geometry>
+  </collision>
+</link>
+```
+
+### Joint Dynamics and Actuator Models
+
+Humanoid robots require realistic joint dynamics modeling:
+
+```xml
+<joint name="left_hip_pitch" type="revolute">
+  <parent link="torso"/>
+  <child link="left_thigh"/>
+  <origin xyz="0 -0.1 -0.2" rpy="0 0 0"/>
+  <axis xyz="1 0 0"/>
+  <limit lower="-1.57" upper="1.57" effort="100.0" velocity="3.0"/>
+
+  <!-- Dynamics parameters for realistic joint behavior -->
+  <dynamics damping="5.0" friction="1.0"/>
+</joint>
+
+<!-- Adding transmission for ROS control -->
+<transmission name="left_hip_pitch_trans">
+  <type>transmission_interface/SimpleTransmission</type>
+  <joint name="left_hip_pitch">
+    <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+  </joint>
+  <actuator name="left_hip_pitch_motor">
+    <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    <mechanicalReduction>1</mechanicalReduction>
+  </actuator>
+</transmission>
+```
+
+## Gazebo Plugins for Humanoid Robots
+
+### Joint Control Plugins
+
+Gazebo provides various plugins for controlling robot joints:
+
+#### Position Control Plugin
+
+```xml
+<gazebo>
+  <plugin name="gazebo_ros_control" filename="libgazebo_ros_control.so">
+    <robotNamespace>/my_humanoid</robotNamespace>
+    <robotSimType>gazebo_ros_control/DefaultRobotHWSim</robotSimType>
+  </plugin>
+</gazebo>
+```
+
+#### Individual Joint Controllers
+
+```xml
+<gazebo>
+  <plugin name="left_leg_controller" filename="libgazebo_ros_joint_position.so">
+    <robotNamespace>/my_humanoid</robotNamespace>
+    <jointName>left_hip_pitch</jointName>
+    <topicName>/my_humanoid/left_hip_pitch/command</topicName>
+    <updateRate>100.0</updateRate>
+    <alwaysOn>true</alwaysOn>
+  </plugin>
+</gazebo>
+```
+
+### Sensor Plugins
+
+Humanoid robots typically use various sensors simulated in Gazebo:
+
+#### IMU Sensor
+
+```xml
+<gazebo reference="torso">
+  <sensor name="imu_sensor" type="imu">
+    <always_on>true</always_on>
+    <update_rate>100</update_rate>
+    <visualize>true</visualize>
+    <topic>__default_topic__</topic>
+    <pose>0 0 0 0 0 0</pose>
+  </sensor>
+</gazebo>
+```
+
+#### Force/Torque Sensors
+
+```xml
+<gazebo>
+  <plugin name="ft_sensor" filename="libgazebo_ros_ft_sensor.so">
+    <updateRate>100.0</updateRate>
+    <topicName>left_foot_force_torque</topicName>
+    <jointName>left_ankle_roll</jointName>
+  </plugin>
+</gazebo>
+```
+
+## ROS 2 Integration
+
+### Robot State Publisher in Simulation
+
+```python
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import JointState
+from tf2_ros import TransformBroadcaster
+from geometry_msgs.msg import TransformStamped
+import math
+
+class GazeboInterfaceNode(Node):
+    def __init__(self):
+        super().__init__('gazebo_interface')
+
+        # Subscribe to Gazebo joint states
+        self.joint_state_sub = self.create_subscription(
+            JointState, '/joint_states', self.joint_state_callback, 10)
+
+        # Publish to robot state publisher
+        self.joint_state_pub = self.create_publisher(
+            JointState, '/my_humanoid/joint_states', 10)
+
+        # TF broadcaster for transforms
+        self.tf_broadcaster = TransformBroadcaster(self)
+
+        self.joint_states = {}
+
+    def joint_state_callback(self, msg):
+        """Receive joint states from Gazebo"""
+        for i, name in enumerate(msg.name):
+            if i < len(msg.position):
+                self.joint_states[name] = msg.position[i]
+
+        # Publish joint states for robot state publisher
+        self.publish_joint_states()
+
+    def publish_joint_states(self):
+        """Publish joint states to robot state publisher"""
+        msg = JointState()
+        msg.name = list(self.joint_states.keys())
+        msg.position = list(self.joint_states.values())
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'base_link'
+
+        self.joint_state_pub.publish(msg)
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = GazeboInterfaceNode()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+### Control Interface
+
+```python
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import Float64MultiArray
+from sensor_msgs.msg import JointState
+import numpy as np
+
+class HumanoidController(Node):
+    def __init__(self):
+        super().__init__('humanoid_controller')
+
+        # Publishers for joint commands
+        self.joint_cmd_pubs = {}
+        joint_names = [
+            'left_hip_pitch', 'left_hip_roll', 'left_hip_yaw',
+            'left_knee', 'left_ankle_pitch', 'left_ankle_roll',
+            'right_hip_pitch', 'right_hip_roll', 'right_hip_yaw',
+            'right_knee', 'right_ankle_pitch', 'right_ankle_roll'
+        ]
+
+        for joint_name in joint_names:
+            self.joint_cmd_pubs[joint_name] = self.create_publisher(
+                Float64MultiArray, f'/my_humanoid/{joint_name}/command', 10)
+
+        # Subscriber for sensor feedback
+        self.joint_state_sub = self.create_subscription(
+            JointState, '/my_humanoid/joint_states', self.joint_state_callback, 10)
+
+        # Walking pattern timer
+        self.walk_timer = self.create_timer(0.01, self.walk_step)
+
+        self.current_joint_states = {}
+        self.walk_phase = 0.0
+
+    def joint_state_callback(self, msg):
+        """Update current joint states"""
+        for i, name in enumerate(msg.name):
+            if i < len(msg.position):
+                self.current_joint_states[name] = msg.position[i]
+
+    def walk_step(self):
+        """Generate walking pattern commands"""
+        # Simple walking pattern based on phase
+        self.walk_phase += 0.01
+
+        # Generate joint commands for walking
+        commands = self.generate_walk_commands(self.walk_phase)
+
+        # Publish commands
+        for joint_name, cmd_value in commands.items():
+            if joint_name in self.joint_cmd_pubs:
+                msg = Float64MultiArray()
+                msg.data = [cmd_value]
+                self.joint_cmd_pubs[joint_name].publish(msg)
+
+    def generate_walk_commands(self, phase):
+        """Generate walking commands based on phase"""
+        commands = {}
+
+        # Simple sinusoidal walking pattern
+        left_hip_cmd = 0.2 * math.sin(phase)
+        right_hip_cmd = 0.2 * math.sin(phase + math.pi)
+
+        commands['left_hip_pitch'] = left_hip_cmd
+        commands['right_hip_pitch'] = right_hip_cmd
+
+        # Add more sophisticated walking pattern here
+        return commands
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = HumanoidController()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+## Physics Tuning for Humanoid Simulation
+
+### Stability Considerations
+
+Humanoid robots are inherently unstable due to their narrow support base. Proper physics tuning is essential:
+
+#### Time Step Selection
+```xml
+<!-- For stable humanoid simulation, use smaller time steps -->
+<physics name="stable_humanoid" type="ode">
+  <max_step_size>0.001</max_step_size>  <!-- 1ms time step -->
+  <real_time_update_rate>1000</real_time_update_rate>
+  <ode>
+    <solver>
+      <iters>50</iters>  <!-- More iterations for stability -->
+      <sor>1.0</sor>
+    </solver>
+    <constraints>
+      <cfm>1e-5</cfm>    <!-- Lower CFM for stiffer constraints -->
+      <erp>0.9</erp>     <!-- Higher ERP for faster error correction -->
+    </constraints>
+  </ode>
+</physics>
+```
+
+#### Contact Parameters
+```xml
+<!-- Proper contact parameters for feet -->
+<gazebo reference="left_foot">
+  <collision>
+    <surface>
+      <friction>
+        <ode>
+          <mu>1.0</mu>      <!-- High friction for stable standing -->
+          <mu2>1.0</mu2>
+        </ode>
+      </friction>
+      <bounce>
+        <restitution_coefficient>0.01</restitution_coefficient>
+        <threshold>100</threshold>
+      </bounce>
+    </surface>
+  </collision>
+</gazebo>
+```
+
+### Mass Distribution
+
+Proper mass distribution is critical for humanoid stability:
+
+```xml
+<!-- Example of realistic humanoid mass distribution -->
+<link name="head">
+  <inertial>
+    <mass value="2.0"/>  <!-- Head: ~2kg -->
+    <inertia ixx="0.01" ixy="0.0" ixz="0.0"
+             iyy="0.01" iyz="0.0" izz="0.01"/>
+  </inertial>
+</link>
+
+<link name="torso">
+  <inertial>
+    <mass value="25.0"/>  <!-- Torso: ~25kg (majority of mass) -->
+    <inertia ixx="1.0" ixy="0.0" ixz="0.0"
+             iyy="1.2" iyz="0.0" izz="0.5"/>
+  </inertial>
+</link>
+
+<link name="upper_arm">
+  <inertial>
+    <mass value="1.5"/>  <!-- Arms: ~1.5kg each -->
+    <inertia ixx="0.01" ixy="0.0" ixz="0.0"
+             iyy="0.05" iyz="0.0" izz="0.05"/>
+  </inertial>
+</link>
+```
+
+## Advanced Gazebo Features for Humanoids
+
+### Custom Physics Plugins
+
+For advanced humanoid simulation, you can create custom physics plugins:
+
+```cpp
+#include <gazebo/gazebo.hh>
+#include <gazebo/physics/physics.hh>
+#include <gazebo/common/common.hh>
+
+namespace gazebo
+{
+  class HumanoidBalancePlugin : public ModelPlugin
+  {
+    public: void Load(physics::ModelPtr _model, sdf::ElementPtr _sdf)
+    {
+      this->model = _model;
+      this->world = _model->GetWorld();
+
+      // Connect to physics update event
+      this->updateConnection = event::Events::ConnectWorldUpdateBegin(
+          std::bind(&HumanoidBalancePlugin::OnUpdate, this));
+    }
+
+    public: void OnUpdate()
+    {
+      // Implement balance control logic
+      // Access links and joints through this->model
+      // Apply forces/torques to maintain balance
+    }
+
+    private: physics::ModelPtr model;
+    private: physics::WorldPtr world;
+    private: event::ConnectionPtr updateConnection;
+  };
+
+  GZ_REGISTER_MODEL_PLUGIN(HumanoidBalancePlugin)
+}
+```
+
+### Terrain and Environment Simulation
+
+Humanoid robots need to navigate various terrains:
+
+```xml
+<!-- Complex terrain for humanoid testing -->
+<world name="humanoid_test_world">
+  <!-- Physics -->
+  <physics name="default" type="ode">
+    <max_step_size>0.001</max_step_size>
+    <real_time_factor>1.0</real_time_factor>
+  </physics>
+
+  <!-- Ground plane with texture -->
+  <model name="ground_plane">
+    <static>true</static>
+    <link name="link">
+      <collision name="collision">
+        <geometry>
+          <plane>
+            <normal>0 0 1</normal>
+            <size>100 100</size>
+          </plane>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <plane>
+            <normal>0 0 1</normal>
+            <size>100 100</size>
+          </plane>
+        </geometry>
+        <material>
+          <script>Gazebo/Grey</script>
+        </material>
+      </visual>
+    </link>
+  </model>
+
+  <!-- Obstacles for navigation testing -->
+  <model name="step_obstacle">
+    <pose>2 0 0.05 0 0 0</pose>
+    <link name="link">
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>0.5 2 0.1</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <box>
+            <size>0.5 2 0.1</size>
+          </box>
+        </geometry>
+      </visual>
+    </link>
+  </model>
+</world>
+```
+
+## Performance Optimization
+
+### Simulation Performance Tips
+
+1. **Time Step**: Balance accuracy vs. performance
+2. **Solver Iterations**: More iterations = more stable but slower
+3. **Collision Geometry**: Use simple shapes for collision, detailed for visuals
+4. **Update Rate**: Match controller requirements
+5. **Visual Updates**: Separate visual and physics update rates
+
+### Parallel Processing
+
+For complex humanoid simulations, consider:
+- Multi-threaded physics simulation
+- Distributed simulation across multiple machines
+- GPU acceleration for physics computation
+
+## Troubleshooting Common Issues
+
+### Instability Problems
+- Increase solver iterations
+- Reduce time step size
+- Check mass/inertia values
+- Verify joint limits and dynamics
+
+### Penetration Issues
+- Increase ERP (Error Reduction Parameter)
+- Decrease CFM (Constraint Force Mixing)
+- Check collision geometry overlap
+- Verify contact parameters
+
+### Performance Issues
+- Simplify collision geometry
+- Reduce update rates where possible
+- Use appropriate physics engine
+- Optimize URDF model complexity
+
+## Summary
+
+Gazebo provides a comprehensive physics simulation environment that is essential for humanoid robot development. Proper configuration of physics parameters, mass properties, and joint dynamics is crucial for realistic humanoid simulation. The integration with ROS 2 enables seamless control and monitoring of simulated humanoid robots.
+
+The key to successful humanoid simulation in Gazebo lies in understanding the balance between physical accuracy and computational performance. By carefully tuning physics parameters and using appropriate models, you can create stable and realistic humanoid simulations that bridge the gap between virtual and physical robotics.
+
+In the next chapter, we'll explore sensor simulation in Gazebo, focusing on how to accurately simulate the various sensors used in humanoid robots.

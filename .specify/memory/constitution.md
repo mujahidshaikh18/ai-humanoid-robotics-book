@@ -1,55 +1,62 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!-- Sync Impact Report -->
+<!--
+Version change: None (initial creation) -> 1.0.0
+Modified principles:
+- None (initial creation)
+Added sections:
+- Key Standards and Technical Environment
+- Project Constraints
+Removed sections:
+- None
+Templates requiring updates:
+- .specify/templates/plan-template.md: ✅ updated
+- .specify/templates/spec-template.md: ✅ updated
+- .specify/templates/tasks-template.md: ✅ updated
+- .specify/templates/commands/*.md: ✅ updated
+- README.md: ✅ updated
+- docs/quickstart.md: ✅ updated
+Follow-up TODOs: None
+-->
+# Physical AI & Humanoid Robotics Course Textbook Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Accuracy
+All factual claims and technical assertions MUST be verified against primary sources. This ensures the foundational correctness of all presented information.
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+### II. Clarity
+Content MUST be written for an academic audience with a computer science background, ranging from beginners to experts. Explanations should be precise, unambiguous, and foster deep understanding.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### III. Reproducibility
+All claims, experiments, and code examples MUST be reproducible and traceable to their sources. This includes explicit citations for algorithms, methodologies, and data.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### IV. Rigor
+Preference MUST be given to peer-reviewed academic sources. All presented concepts MUST reflect established scientific and engineering principles in AI and robotics.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+## Key Standards and Technical Environment
 
-### [PRINCIPLE_6_NAME]
+*   All factual claims MUST be traceable to specific sources.
+*   Citation format MUST adhere to APA style guidelines.
+*   Source types MUST include a minimum of 50% peer-reviewed articles.
+*   Plagiarism checks MUST result in 0% tolerance before submission.
+*   Writing clarity MUST meet a Flesch-Kincaid grade level of 10-12.
+*   The textbook documentation platform is Docusaurus, requiring content to be compatible with its publishing framework.
 
+## Project Constraints
 
-[PRINCIPLE__DESCRIPTION]
-
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
-
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
-
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
-
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+*   The final manuscript word count MUST be between 5,000 and 7,000 words.
+*   The textbook MUST include a minimum of 15 distinct academic sources.
+*   The final output format MUST be a PDF with embedded citations.
+*   The textbook MUST focus on hands-on projects, integrating practical applications with theoretical concepts.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+*   This Constitution serves as the supreme governing document for the "Physical AI & Humanoid Robotics Course Textbook".
+*   Amendments to this Constitution require a documented proposal, review, and explicit approval.
+*   Compliance reviews MUST be conducted periodically to ensure all content adheres to the following success criteria:
+    *   All claims verified against sources.
+    *   Zero plagiarism detected.
+    *   Passes fact-checking review.
+*   Version changes follow semantic versioning (MAJOR.MINOR.PATCH) based on the impact of amendments.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Version**: 1.0.0 | **Ratified**: 2025-12-05 | **Last Amended**: 2025-12-05

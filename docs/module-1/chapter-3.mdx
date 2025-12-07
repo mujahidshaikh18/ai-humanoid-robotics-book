@@ -1,0 +1,595 @@
+---
+sidebar_position: 3
+title: 'Chapter 3: Building ROS 2 Packages in Python'
+---
+
+# Building ROS 2 Packages in Python
+
+## Overview
+
+This chapter focuses on creating ROS 2 packages using Python, covering package structure, node development, message handling, and best practices for Python-based robotic applications.
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+- Create and structure ROS 2 packages in Python
+- Develop nodes using the rclpy client library
+- Handle messages, services, and actions in Python
+- Implement parameter management and logging
+- Follow best practices for Python-based ROS 2 development
+
+## ROS 2 Package Structure
+
+A ROS 2 package in Python follows a specific directory structure:
+
+```
+my_robot_package/
+├── CMakeLists.txt          # Not needed for pure Python packages
+├── package.xml             # Package manifest
+├── setup.py                # Python package setup
+├── setup.cfg               # Installation configuration
+├── resource/               # Package resource files
+├── test/                   # Test files
+└── my_robot_package/       # Python module
+    ├── __init__.py
+    ├── my_node.py
+    └── my_module.py
+```
+
+### Creating a New Package
+
+To create a new ROS 2 package for Python development:
+
+```bash
+ros2 pkg create --build-type ament_python my_robot_package
+```
+
+This creates the basic structure with the necessary files for a Python package.
+
+## Package Configuration
+
+### package.xml
+
+The package.xml file contains metadata about your package:
+
+```xml
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>my_robot_package</name>
+  <version>0.0.0</version>
+  <description>Package for my robot functionality</description>
+  <maintainer email="user@example.com">Your Name</maintainer>
+  <license>Apache License 2.0</license>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
+```
+
+### setup.py
+
+The setup.py file configures the Python package:
+
+```python
+from setuptools import setup
+import os
+from glob import glob
+
+package_name = 'my_robot_package'
+
+setup(
+    name=package_name,
+    version='0.0.0',
+    packages=[package_name],
+    data_files=[
+        ('share/ament_index/resource_index/packages',
+            ['resource/' + package_name]),
+        ('share/' + package_name, ['package.xml']),
+        # Include all launch files
+        (os.path.join('share', package_name, 'launch'), glob('launch/*launch.[pxy][yma]*')),
+    ],
+    install_requires=['setuptools'],
+    zip_safe=True,
+    maintainer='Your Name',
+    maintainer_email='user@example.com',
+    description='Package for my robot functionality',
+    license='Apache License 2.0',
+    tests_require=['pytest'],
+    entry_points={
+        'console_scripts': [
+            'my_node = my_robot_package.my_node:main',
+            'another_node = my_robot_package.another_node:main',
+        ],
+    },
+)
+```
+
+## Creating Nodes in Python
+
+### Basic Node Structure
+
+```python
+import rclpy
+from rclpy.node import Node
+
+class MyRobotNode(Node):
+    def __init__(self):
+        super().__init__('my_robot_node')
+        self.get_logger().info('My Robot Node has started')
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = MyRobotNode()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+### Publisher Example
+
+```python
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+
+class MinimalPublisher(Node):
+    def __init__(self):
+        super().__init__('minimal_publisher')
+
+        # Create publisher
+        self.publisher_ = self.create_publisher(String, 'topic', 10)
+
+        # Create timer
+        timer_period = 0.5  # seconds
+        self.timer = self.create_timer(timer_period, self.timer_callback)
+        self.i = 0
+
+    def timer_callback(self):
+        msg = String()
+        msg.data = 'Hello World: %d' % self.i
+        self.publisher_.publish(msg)
+        self.get_logger().info('Publishing: "%s"' % msg.data)
+        self.i += 1
+
+def main(args=None):
+    rclpy.init(args=args)
+    minimal_publisher = MinimalPublisher()
+
+    try:
+        rclpy.spin(minimal_publisher)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        minimal_publisher.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+### Subscriber Example
+
+```python
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+
+class MinimalSubscriber(Node):
+    def __init__(self):
+        super().__init__('minimal_subscriber')
+        self.subscription = self.create_subscription(
+            String,
+            'topic',
+            self.listener_callback,
+            10)
+        self.subscription  # prevent unused variable warning
+
+    def listener_callback(self, msg):
+        self.get_logger().info('I heard: "%s"' % msg.data)
+
+def main(args=None):
+    rclpy.init(args=args)
+    minimal_subscriber = MinimalSubscriber()
+
+    try:
+        rclpy.spin(minimal_subscriber)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        minimal_subscriber.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+## Working with Messages
+
+### Custom Messages
+
+To create custom messages, you define them in .msg files in a msg directory:
+
+```
+msg/
+├── RobotPose.msg
+└── SensorData.msg
+```
+
+Example RobotPose.msg:
+```
+float64 x
+float64 y
+float64 theta
+uint8 state
+```
+
+Then reference them in your package.xml:
+```xml
+<build_depend>rosidl_default_generators</build_depend>
+<exec_depend>rosidl_default_runtime</exec_depend>
+<member_of_group>rosidl_interface_packages</member_of_group>
+```
+
+### Using Custom Messages
+
+```python
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+# Import your custom message
+from my_robot_package.msg import RobotPose
+
+class MessageNode(Node):
+    def __init__(self):
+        super().__init__('message_node')
+
+        # Publisher with custom message
+        self.publisher_ = self.create_publisher(RobotPose, 'robot_pose', 10)
+
+        # Subscriber with custom message
+        self.subscription = self.create_subscription(
+            RobotPose,
+            'robot_pose',
+            self.pose_callback,
+            10)
+
+        # Timer to publish custom message
+        self.timer = self.create_timer(1.0, self.publish_pose)
+        self.pose_counter = 0
+
+    def publish_pose(self):
+        msg = RobotPose()
+        msg.x = float(self.pose_counter)
+        msg.y = float(self.pose_counter * 2)
+        msg.theta = float(self.pose_counter * 0.1)
+        msg.state = 1
+        self.publisher_.publish(msg)
+        self.pose_counter += 1
+
+    def pose_callback(self, msg):
+        self.get_logger().info(f'Received pose: ({msg.x}, {msg.y}, {msg.theta})')
+```
+
+## Services in Python
+
+### Creating a Service Server
+
+```python
+import rclpy
+from rclpy.node import Node
+from example_interfaces.srv import AddTwoInts
+
+class MinimalService(Node):
+    def __init__(self):
+        super().__init__('minimal_service')
+        self.srv = self.create_service(
+            AddTwoInts,
+            'add_two_ints',
+            self.add_two_ints_callback)
+
+    def add_two_ints_callback(self, request, response):
+        response.sum = request.a + request.b
+        self.get_logger().info(f'Returning {request.a} + {request.b} = {response.sum}')
+        return response
+
+def main(args=None):
+    rclpy.init(args=args)
+    minimal_service = MinimalService()
+
+    try:
+        rclpy.spin(minimal_service)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        minimal_service.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+### Creating a Service Client
+
+```python
+import rclpy
+from rclpy.node import Node
+from example_interfaces.srv import AddTwoInts
+
+class MinimalClientAsync(Node):
+    def __init__(self):
+        super().__init__('minimal_client_async')
+        self.cli = self.create_client(AddTwoInts, 'add_two_ints')
+
+        while not self.cli.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('Service not available, waiting again...')
+
+        self.req = AddTwoInts.Request()
+
+    def send_request(self, a, b):
+        self.req.a = a
+        self.req.b = b
+        self.future = self.cli.call_async(self.req)
+        rclpy.spin_until_future_complete(self, self.future)
+        return self.future.result()
+
+def main(args=None):
+    rclpy.init(args=args)
+    minimal_client = MinimalClientAsync()
+    response = minimal_client.send_request(1, 2)
+    minimal_client.get_logger().info(f'Result: {response.sum}')
+    minimal_client.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+## Actions in Python
+
+### Creating an Action Server
+
+```python
+import rclpy
+from rclpy.action import ActionServer
+from rclpy.node import Node
+from example_interfaces.action import Fibonacci
+
+class FibonacciActionServer(Node):
+    def __init__(self):
+        super().__init__('fibonacci_action_server')
+        self._action_server = ActionServer(
+            self,
+            Fibonacci,
+            'fibonacci',
+            self.execute_callback)
+
+    def execute_callback(self, goal_handle):
+        self.get_logger().info('Executing goal...')
+
+        feedback_msg = Fibonacci.Feedback()
+        feedback_msg.sequence = [0, 1]
+
+        for i in range(1, goal_handle.request.order):
+            if goal_handle.is_cancel_requested:
+                goal_handle.canceled()
+                self.get_logger().info('Goal canceled')
+                result = Fibonacci.Result()
+                result.sequence = []
+                return result
+
+            feedback_msg.sequence.append(
+                feedback_msg.sequence[i] + feedback_msg.sequence[i-1])
+
+            self.get_logger().info(f'Feedback: {feedback_msg.sequence}')
+            goal_handle.publish_feedback(feedback_msg)
+
+        goal_handle.succeed()
+        result = Fibonacci.Result()
+        result.sequence = feedback_msg.sequence
+
+        self.get_logger().info(f'Result: {result.sequence}')
+        return result
+
+def main(args=None):
+    rclpy.init(args=args)
+    fibonacci_action_server = FibonacciActionServer()
+
+    try:
+        rclpy.spin(fibonacci_action_server)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        fibonacci_action_server.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+## Parameters and Configuration
+
+### Working with Parameters
+
+```python
+import rclpy
+from rclpy.node import Node
+from rcl_interfaces.msg import ParameterType
+from rclpy.parameter import Parameter
+
+class ParameterNode(Node):
+    def __init__(self):
+        super().__init__('parameter_node')
+
+        # Declare parameters with default values
+        self.declare_parameter('robot_name', 'my_robot')
+        self.declare_parameter('max_velocity', 1.0)
+        self.declare_parameter('sensor_enabled', True)
+
+        # Get parameter values
+        self.robot_name = self.get_parameter('robot_name').value
+        self.max_velocity = self.get_parameter('max_velocity').value
+        self.sensor_enabled = self.get_parameter('sensor_enabled').value
+
+        self.get_logger().info(f'Robot name: {self.robot_name}')
+        self.get_logger().info(f'Max velocity: {self.max_velocity}')
+        self.get_logger().info(f'Sensor enabled: {self.sensor_enabled}')
+
+        # Set up parameter callback
+        self.add_on_set_parameters_callback(self.parameter_callback)
+
+    def parameter_callback(self, parameters):
+        from rcl_interfaces.msg import SetParametersResult
+        result = SetParametersResult()
+        result.successful = True
+
+        for param in parameters:
+            if param.name == 'max_velocity':
+                if param.value < 0.0:
+                    result.successful = False
+                    result.reason = 'Max velocity must be positive'
+                    break
+
+        return result
+
+def main(args=None):
+    rclpy.init(args=args)
+    parameter_node = ParameterNode()
+
+    try:
+        rclpy.spin(parameter_node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        parameter_node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+## Logging and Debugging
+
+### Comprehensive Logging
+
+```python
+import rclpy
+from rclpy.node import Node
+
+class LoggingNode(Node):
+    def __init__(self):
+        super().__init__('logging_node')
+
+        # Different log levels
+        self.get_logger().debug('This is a debug message')
+        self.get_logger().info('This is an info message')
+        self.get_logger().warn('This is a warning message')
+        self.get_logger().error('This is an error message')
+        self.get_logger().fatal('This is a fatal message')
+
+        # Log with variables
+        count = 42
+        self.get_logger().info(f'Counter value: {count}')
+
+        # Exception logging
+        try:
+            result = 10 / 0
+        except ZeroDivisionError as e:
+            self.get_logger().error(f'Division error: {str(e)}')
+
+def main(args=None):
+    rclpy.init(args=args)
+    logging_node = LoggingNode()
+
+    try:
+        rclpy.spin(logging_node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        logging_node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+## Best Practices
+
+### Node Organization
+
+Organize your Python nodes with clear separation of concerns:
+
+```python
+# my_robot_package/my_robot_controller.py
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import Twist
+from sensor_msgs.msg import LaserScan
+
+class RobotController(Node):
+    def __init__(self):
+        super().__init__('robot_controller')
+
+        # Publishers
+        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+
+        # Subscribers
+        self.scan_sub = self.create_subscription(
+            LaserScan, '/scan', self.scan_callback, 10)
+
+        # Parameters
+        self.declare_parameter('linear_speed', 0.5)
+        self.declare_parameter('angular_speed', 1.0)
+
+        # Timers
+        self.control_timer = self.create_timer(0.1, self.control_loop)
+
+        self.get_logger().info('Robot controller initialized')
+
+    def scan_callback(self, msg):
+        # Process laser scan data
+        pass
+
+    def control_loop(self):
+        # Implement control logic
+        pass
+
+def main(args=None):
+    rclpy.init(args=args)
+    controller = RobotController()
+
+    try:
+        rclpy.spin(controller)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        controller.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+## Summary
+
+This chapter covered the fundamentals of building ROS 2 packages in Python, including package structure, node development, communication patterns, and best practices. You now have the foundation to create Python-based ROS 2 applications for your robotic systems.
+
+In the next chapter, we'll explore URDF and how to define humanoid robot descriptions.

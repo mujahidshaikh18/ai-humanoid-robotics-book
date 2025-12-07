@@ -1,0 +1,984 @@
+---
+sidebar_position: 10
+title: 'Chapter 10: Unity for High-Fidelity Simulation'
+---
+
+# Unity for High-Fidelity Simulation
+
+## Overview
+
+Unity is a powerful game engine that has emerged as a leading platform for high-fidelity robotics simulation. With its advanced rendering capabilities, physics engine, and flexible scripting system, Unity provides an excellent environment for creating photorealistic simulations of humanoid robots. This chapter explores how to leverage Unity for robotics applications, focusing on humanoid robot simulation.
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+- Set up Unity for robotics simulation
+- Import and configure humanoid robot models
+- Implement physics-based simulation
+- Integrate Unity with ROS 2
+- Create photorealistic environments
+- Generate synthetic training data
+
+## Introduction to Unity for Robotics
+
+Unity has become increasingly popular in robotics research and development due to its:
+
+1. **High-Fidelity Rendering**: Photorealistic graphics capabilities
+2. **Physics Engine**: Realistic physics simulation with PhysX
+3. **Asset Store**: Extensive library of models and environments
+4. **Scripting**: Flexible C# scripting for custom behaviors
+5. **XR Support**: Virtual and augmented reality capabilities
+6. **Performance**: Optimized for real-time simulation
+
+### Unity Robotics Ecosystem
+
+The Unity robotics ecosystem includes several key components:
+
+- **Unity Robotics Hub**: Centralized access to robotics tools
+- **Unity Robotics Package**: ROS/ROS2 integration
+- **Unity ML-Agents**: Machine learning for robotics
+- **Unity Perception**: Synthetic data generation
+- **Unity Simulation**: Large-scale simulation capabilities
+
+## Setting Up Unity for Robotics
+
+### Installing Unity
+
+For robotics applications, it's recommended to use Unity 2021.3 LTS (Long Term Support) or later:
+
+1. Download Unity Hub from the Unity website
+2. Install Unity Editor with the Universal Render Pipeline (URP) or High Definition Render Pipeline (HDRP)
+3. Install the Robotics packages through Unity Package Manager
+
+### Required Packages
+
+Install these essential packages for robotics simulation:
+
+1. **ROS-TCP-Connector**: For ROS communication
+2. **ML-Agents**: For reinforcement learning
+3. **Perception**: For synthetic data generation
+4. **XR packages**: For extended reality applications
+
+## Unity-Ros Integration
+
+### ROS-TCP-Connector Setup
+
+The ROS-TCP-Connector enables communication between Unity and ROS 2:
+
+```csharp
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using Unity.Robotics.ROSTCPConnector;
+using RosMessageTypes.Sensor;
+using RosMessageTypes.Geometry;
+
+public class UnityRobotController : MonoBehaviour
+{
+    ROSConnection ros;
+    string rosTopic = "unity_robot_command";
+
+    // Robot joint transforms
+    public Transform leftHip;
+    public Transform rightHip;
+    public Transform leftKnee;
+    public Transform rightKnee;
+
+    // Start is called before the first frame update
+    void Start()
+    {
+        // Get the ROS connection static instance
+        ros = ROSConnection.GetOrCreateInstance();
+        ros.RegisterPublisher<JointStateMsg>(rosTopic);
+    }
+
+    void Update()
+    {
+        // Send joint states to ROS
+        SendJointStates();
+    }
+
+    void SendJointStates()
+    {
+        // Create and populate joint state message
+        var jointState = new JointStateMsg();
+        jointState.name = new string[] {
+            "left_hip", "right_hip", "left_knee", "right_knee"
+        };
+        jointState.position = new double[] {
+            leftHip.localEulerAngles.y,
+            rightHip.localEulerAngles.y,
+            leftKnee.localEulerAngles.x,
+            rightKnee.localEulerAngles.x
+        };
+        jointState.header.stamp = new TimeStamp(0, 0);
+        jointState.header.frame_id = "base_link";
+
+        // Publish the message
+        ros.Publish(rosTopic, jointState);
+    }
+}
+```
+
+### Receiving ROS Messages in Unity
+
+```csharp
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using Unity.Robotics.ROSTCPConnector;
+using RosMessageTypes.Geometry;
+
+public class UnityROSReceiver : MonoBehaviour
+{
+    ROSConnection ros;
+    string rosTopic = "cmd_vel";
+
+    // Robot parts to control
+    public Transform robotBody;
+    public float moveSpeed = 1.0f;
+
+    void Start()
+    {
+        ros = ROSConnection.GetOrCreateInstance();
+        ros.Subscribe<TwistMsg>(rosTopic, CmdVelCallback);
+    }
+
+    void CmdVelCallback(TwistMsg cmd)
+    {
+        // Apply movement to robot
+        Vector3 movement = new Vector3((float)cmd.linear.x, 0, (float)cmd.angular.z);
+        robotBody.Translate(movement * moveSpeed * Time.deltaTime);
+    }
+}
+```
+
+## Humanoid Robot Model Setup
+
+### Importing Robot Models
+
+When importing humanoid robot models into Unity:
+
+1. **Model Format**: Use FBX format for best compatibility
+2. **Scale**: Ensure models are correctly scaled (1 unit = 1 meter)
+3. **Origin**: Center the model at the origin for easier manipulation
+4. **Hierarchy**: Maintain proper joint hierarchy for animation
+
+### Setting Up Humanoid Rig
+
+```csharp
+using UnityEngine;
+
+public class HumanoidRigSetup : MonoBehaviour
+{
+    // Humanoid joint references
+    public Transform pelvis;
+    public Transform spine;
+    public Transform chest;
+    public Transform neck;
+    public Transform head;
+
+    public Transform leftHip;
+    public Transform leftKnee;
+    public Transform leftAnkle;
+    public Transform leftFoot;
+
+    public Transform rightHip;
+    public Transform rightKnee;
+    public Transform rightAnkle;
+    public Transform rightFoot;
+
+    public Transform leftShoulder;
+    public Transform leftElbow;
+    public Transform leftWrist;
+    public Transform leftHand;
+
+    public Transform rightShoulder;
+    public Transform rightElbow;
+    public Transform rightWrist;
+    public Transform rightHand;
+
+    void Start()
+    {
+        SetupRigConstraints();
+    }
+
+    void SetupRigConstraints()
+    {
+        // Configure joint limits and constraints
+        ConfigureJointLimits(leftHip, -45f, 45f, -10f, 10f, -10f, 10f);
+        ConfigureJointLimits(rightHip, -45f, 45f, -10f, 10f, -10f, 10f);
+        ConfigureJointLimits(leftKnee, 0f, 130f, 0f, 0f, 0f, 0f);
+        ConfigureJointLimits(rightKnee, 0f, 130f, 0f, 0f, 0f, 0f);
+    }
+
+    void ConfigureJointLimits(Transform joint, float xMin, float xMax,
+                             float yMin, float yMax, float zMin, float zMax)
+    {
+        ConfigurableJoint configJoint = joint.GetComponent<ConfigurableJoint>();
+        if (configJoint == null)
+        {
+            configJoint = joint.gameObject.AddComponent<ConfigurableJoint>();
+        }
+
+        // Set angular limits
+        SoftJointLimit limit = new SoftJointLimit();
+        limit.limit = 45f; // Default limit
+        configJoint.angularXLimit = limit;
+        configJoint.angularYLimit = limit;
+        configJoint.angularZLimit = limit;
+    }
+}
+```
+
+## Physics Simulation in Unity
+
+### Configuring PhysX for Humanoid Simulation
+
+Unity's PhysX engine provides realistic physics simulation:
+
+```csharp
+using UnityEngine;
+
+public class HumanoidPhysicsSetup : MonoBehaviour
+{
+    public float gravityScale = 1.0f;
+    public float massScale = 1.0f;
+
+    void Start()
+    {
+        SetupPhysicsProperties();
+    }
+
+    void SetupPhysicsProperties()
+    {
+        // Configure gravity
+        Physics.gravity = new Vector3(0, -9.81f * gravityScale, 0);
+
+        // Configure each body part with appropriate mass
+        ConfigureBodyPartMass("pelvis", 10.0f * massScale);
+        ConfigureBodyPartMass("torso", 20.0f * massScale);
+        ConfigureBodyPartMass("head", 3.0f * massScale);
+        ConfigureBodyPartMass("upper_arm", 2.0f * massScale);
+        ConfigureBodyPartMass("lower_arm", 1.5f * massScale);
+        ConfigureBodyPartMass("thigh", 5.0f * massScale);
+        ConfigureBodyPartMass("shin", 3.0f * massScale);
+        ConfigureBodyPartMass("foot", 1.0f * massScale);
+    }
+
+    void ConfigureBodyPartMass(string partName, float mass)
+    {
+        Transform part = transform.Find(partName);
+        if (part != null)
+        {
+            Rigidbody rb = part.GetComponent<Rigidbody>();
+            if (rb == null)
+            {
+                rb = part.gameObject.AddComponent<Rigidbody>();
+            }
+            rb.mass = mass;
+            rb.interpolation = RigidbodyInterpolation.Interpolate;
+        }
+    }
+}
+```
+
+### Balance Control System
+
+```csharp
+using UnityEngine;
+
+public class HumanoidBalanceController : MonoBehaviour
+{
+    public Transform centerOfMass;
+    public Transform leftFoot;
+    public Transform rightFoot;
+    public float balanceThreshold = 0.1f;
+    public float recoverySpeed = 5.0f;
+
+    private Rigidbody rb;
+
+    void Start()
+    {
+        rb = GetComponent<Rigidbody>();
+        if (rb != null)
+        {
+            rb.centerOfMass = centerOfMass.localPosition;
+        }
+    }
+
+    void Update()
+    {
+        MaintainBalance();
+    }
+
+    void MaintainBalance()
+    {
+        if (rb == null) return;
+
+        // Calculate center of mass position relative to feet
+        Vector3 comPosition = transform.TransformPoint(centerOfMass.localPosition);
+        Vector3 leftFootPos = new Vector3(leftFoot.position.x, comPosition.y, leftFoot.position.z);
+        Vector3 rightFootPos = new Vector3(rightFoot.position.x, comPosition.y, rightFoot.position.z);
+
+        // Calculate support polygon (simplified as line between feet)
+        float supportCenterX = (leftFootPos.x + rightFootPos.x) / 2f;
+        float supportWidth = Mathf.Abs(leftFootPos.x - rightFootPos.x);
+
+        // Check if COM is within support polygon
+        float comOffset = Mathf.Abs(comPosition.x - supportCenterX);
+
+        if (comOffset > supportWidth / 2f + balanceThreshold)
+        {
+            // Apply corrective torque to maintain balance
+            Vector3 correctiveTorque = Vector3.zero;
+            correctiveTorque.z = (supportCenterX - comPosition.x) * recoverySpeed;
+            rb.AddTorque(correctiveTorque, ForceMode.Acceleration);
+        }
+    }
+}
+```
+
+## High-Fidelity Rendering
+
+### Setting Up Realistic Materials
+
+```csharp
+using UnityEngine;
+
+public class MaterialSetup : MonoBehaviour
+{
+    public Material metalMaterial;
+    public Material rubberMaterial;
+    public Material plasticMaterial;
+
+    void Start()
+    {
+        SetupRobotMaterials();
+    }
+
+    void SetupRobotMaterials()
+    {
+        // Apply materials to different robot parts
+        ApplyMaterial("head", metalMaterial);
+        ApplyMaterial("torso", metalMaterial);
+        ApplyMaterial("upper_arm", metalMaterial);
+        ApplyMaterial("lower_arm", metalMaterial);
+        ApplyMaterial("hand", rubberMaterial);
+        ApplyMaterial("foot", rubberMaterial);
+    }
+
+    void ApplyMaterial(string partName, Material material)
+    {
+        Transform part = transform.Find(partName);
+        if (part != null)
+        {
+            Renderer renderer = part.GetComponent<Renderer>();
+            if (renderer != null)
+            {
+                renderer.material = material;
+            }
+        }
+    }
+}
+```
+
+### Lighting Setup for Realism
+
+```csharp
+using UnityEngine;
+
+public class RealisticLightingSetup : MonoBehaviour
+{
+    public Light mainLight;
+    public Light fillLight;
+    public Light rimLight;
+
+    void Start()
+    {
+        SetupLighting();
+    }
+
+    void SetupLighting()
+    {
+        // Main directional light (sun/simulation light)
+        if (mainLight != null)
+        {
+            mainLight.type = LightType.Directional;
+            mainLight.intensity = 1.0f;
+            mainLight.color = Color.white;
+            mainLight.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
+        }
+
+        // Fill light to reduce harsh shadows
+        if (fillLight != null)
+        {
+            fillLight.type = LightType.Directional;
+            fillLight.intensity = 0.3f;
+            fillLight.color = Color.gray;
+            fillLight.transform.rotation = Quaternion.Euler(-50f, 150f, 0f);
+        }
+
+        // Rim light for edge definition
+        if (rimLight != null)
+        {
+            rimLight.type = LightType.Directional;
+            rimLight.intensity = 0.2f;
+            rimLight.color = Color.blue;
+            rimLight.transform.rotation = Quaternion.Euler(10f, 210f, 0f);
+        }
+    }
+}
+```
+
+## Synthetic Data Generation
+
+### Perception Package Integration
+
+Unity's Perception package enables synthetic data generation:
+
+```csharp
+using UnityEngine;
+using Unity.Perception.GroundTruth;
+using Unity.Perception.Randomization.Samplers;
+
+public class SyntheticDataGenerator : MonoBehaviour
+{
+    public GameObject robot;
+    public GameObject[] environmentObjects;
+    public int datasetSize = 1000;
+
+    void Start()
+    {
+        GenerateSyntheticDataset();
+    }
+
+    void GenerateSyntheticDataset()
+    {
+        for (int i = 0; i < datasetSize; i++)
+        {
+            // Randomize environment
+            RandomizeEnvironment();
+
+            // Randomize robot pose
+            RandomizeRobotPose();
+
+            // Capture synthetic data
+            CaptureSyntheticImage(i);
+        }
+    }
+
+    void RandomizeEnvironment()
+    {
+        foreach (GameObject obj in environmentObjects)
+        {
+            // Randomize position
+            obj.transform.position = new Vector3(
+                Random.Range(-5f, 5f),
+                0f,
+                Random.Range(-5f, 5f)
+            );
+
+            // Randomize rotation
+            obj.transform.rotation = Quaternion.Euler(
+                0f,
+                Random.Range(0f, 360f),
+                0f
+            );
+        }
+    }
+
+    void RandomizeRobotPose()
+    {
+        // Randomize robot position
+        robot.transform.position = new Vector3(
+            Random.Range(-2f, 2f),
+            0f,
+            Random.Range(-2f, 2f)
+        );
+
+        // Randomize robot orientation
+        robot.transform.rotation = Quaternion.Euler(
+            0f,
+            Random.Range(0f, 360f),
+            0f
+        );
+    }
+
+    void CaptureSyntheticImage(int index)
+    {
+        // In a real implementation, you would use Perception package
+        // to capture images with semantic segmentation, depth, etc.
+        Debug.Log($"Captured synthetic image {index + 1}/{datasetSize}");
+    }
+}
+```
+
+## ML-Agents Integration
+
+### Setting Up Reinforcement Learning Environment
+
+```csharp
+using Unity.MLAgents;
+using Unity.MLAgents.Sensors;
+using Unity.MLAgents.Actuators;
+using UnityEngine;
+
+public class HumanoidLearningAgent : Agent
+{
+    public Transform target;
+    public float moveSpeed = 5.0f;
+    public float rotationSpeed = 100.0f;
+
+    private Rigidbody rb;
+    private float distanceToTarget;
+
+    public override void Initialize()
+    {
+        rb = GetComponent<Rigidbody>();
+        distanceToTarget = Vector3.Distance(transform.position, target.position);
+    }
+
+    public override void OnEpisodeBegin()
+    {
+        // Reset agent position
+        transform.position = new Vector3(
+            Random.Range(-3f, 3f),
+            1f,
+            Random.Range(-3f, 3f)
+        );
+
+        // Reset target position
+        target.position = new Vector3(
+            Random.Range(-4f, 4f),
+            0.5f,
+            Random.Range(-4f, 4f)
+        );
+
+        distanceToTarget = Vector3.Distance(transform.position, target.position);
+    }
+
+    public override void CollectObservations(VectorSensor sensor)
+    {
+        // Agent position and rotation
+        sensor.AddObservation(transform.position);
+        sensor.AddObservation(transform.rotation.eulerAngles);
+
+        // Target position relative to agent
+        sensor.AddObservation(target.position - transform.position);
+
+        // Velocity
+        sensor.AddObservation(rb.velocity);
+
+        // Distance to target
+        sensor.AddObservation(distanceToTarget);
+    }
+
+    public override void OnActionReceived(ActionBuffers actions)
+    {
+        // Actions: [0] forward/back, [1] left/right, [2] rotate
+        float forward = actions.ContinuousActions[0];
+        float strafe = actions.ContinuousActions[1];
+        float rotate = actions.ContinuousActions[2];
+
+        // Move the agent
+        Vector3 movement = new Vector3(strafe, 0, forward) * moveSpeed * Time.deltaTime;
+        transform.Translate(movement);
+
+        // Rotate the agent
+        transform.Rotate(0, rotate * rotationSpeed * Time.deltaTime, 0);
+
+        // Calculate new distance to target
+        float newDistance = Vector3.Distance(transform.position, target.position);
+
+        // Reward based on distance to target
+        float reward = (distanceToTarget - newDistance) * 10f;
+        SetReward(reward);
+
+        distanceToTarget = newDistance;
+
+        // Check if reached target
+        if (newDistance < 1.0f)
+        {
+            SetReward(10.0f);
+            EndEpisode();
+        }
+
+        // Check if agent fell
+        if (transform.position.y < -1.0f)
+        {
+            SetReward(-10.0f);
+            EndEpisode();
+        }
+    }
+
+    public override void Heuristic(in ActionBuffers actionsOut)
+    {
+        // Manual control for testing
+        var continuousActionsOut = actionsOut.ContinuousActions;
+        continuousActionsOut[0] = Input.GetAxis("Vertical"); // Forward/back
+        continuousActionsOut[1] = Input.GetAxis("Horizontal"); // Left/right
+        continuousActionsOut[2] = Input.GetKey(KeyCode.Q) ? -1f :
+                     Input.GetKey(KeyCode.E) ? 1f : 0f; // Rotate
+    }
+}
+```
+
+## Advanced Simulation Features
+
+### Multi-Robot Simulation
+
+```csharp
+using System.Collections.Generic;
+using UnityEngine;
+
+public class MultiRobotSimulation : MonoBehaviour
+{
+    public GameObject robotPrefab;
+    public int robotCount = 5;
+    public float spawnRadius = 10f;
+
+    private List<GameObject> robots = new List<GameObject>();
+
+    void Start()
+    {
+        SpawnRobots();
+    }
+
+    void SpawnRobots()
+    {
+        for (int i = 0; i < robotCount; i++)
+        {
+            // Calculate spawn position in a circle
+            float angle = (2 * Mathf.PI * i) / robotCount;
+            Vector3 spawnPosition = new Vector3(
+                Mathf.Cos(angle) * spawnRadius,
+                1f,
+                Mathf.Sin(angle) * spawnRadius
+            );
+
+            // Instantiate robot
+            GameObject robot = Instantiate(robotPrefab, spawnPosition, Quaternion.identity);
+            robots.Add(robot);
+
+            // Assign unique ID
+            robot.name = $"Robot_{i:D2}";
+        }
+    }
+
+    void Update()
+    {
+        // Coordinate robot behaviors
+        CoordinateRobots();
+    }
+
+    void CoordinateRobots()
+    {
+        // Example: Simple formation control
+        for (int i = 0; i < robots.Count; i++)
+        {
+            GameObject robot = robots[i];
+            float angle = (2 * Mathf.PI * i) / robotCount;
+            Vector3 targetPosition = new Vector3(
+                Mathf.Cos(angle) * 5f,
+                1f,
+                Mathf.Sin(angle) * 5f
+            );
+
+            // Move robot toward formation position
+            Vector3 direction = (targetPosition - robot.transform.position).normalized;
+            robot.transform.position += direction * 0.01f;
+        }
+    }
+}
+```
+
+### Sensor Simulation
+
+```csharp
+using UnityEngine;
+using System.Collections.Generic;
+
+public class UnitySensorSimulation : MonoBehaviour
+{
+    public float sensorRange = 10f;
+    public int sensorResolution = 360;
+    public LayerMask detectionMask;
+
+    private float[] sensorReadings;
+
+    void Start()
+    {
+        sensorReadings = new float[sensorResolution];
+    }
+
+    void Update()
+    {
+        SimulateLidarScan();
+    }
+
+    void SimulateLidarScan()
+    {
+        for (int i = 0; i < sensorResolution; i++)
+        {
+            float angle = (2 * Mathf.PI * i) / sensorResolution;
+            Vector3 direction = new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle));
+
+            RaycastHit hit;
+            if (Physics.Raycast(transform.position, direction, out hit, sensorRange, detectionMask))
+            {
+                sensorReadings[i] = hit.distance;
+            }
+            else
+            {
+                sensorReadings[i] = sensorRange; // No obstacle detected
+            }
+        }
+
+        // In a real implementation, you would publish this data to ROS
+        PublishSensorData();
+    }
+
+    void PublishSensorData()
+    {
+        // Convert to ROS LaserScan message and publish
+        // This would use the ROS-TCP-Connector
+    }
+
+    // Visualization for debugging
+    void OnDrawGizmosSelected()
+    {
+        if (sensorReadings == null) return;
+
+        for (int i = 0; i < sensorResolution; i++)
+        {
+            float angle = (2 * Mathf.PI * i) / sensorResolution;
+            Vector3 direction = new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle));
+            float distance = sensorReadings[i];
+
+            Gizmos.color = distance < sensorRange ? Color.red : Color.green;
+            Gizmos.DrawRay(transform.position, direction * distance);
+        }
+    }
+}
+```
+
+## Performance Optimization
+
+### Level of Detail (LOD) System
+
+```csharp
+using UnityEngine;
+
+public class RobotLODSystem : MonoBehaviour
+{
+    public Transform[] lodLevels;
+    public float[] lodDistances;
+    public Camera mainCamera;
+
+    void Start()
+    {
+        if (mainCamera == null)
+        {
+            mainCamera = Camera.main;
+        }
+    }
+
+    void Update()
+    {
+        UpdateLOD();
+    }
+
+    void UpdateLOD()
+    {
+        if (mainCamera == null) return;
+
+        float distance = Vector3.Distance(transform.position, mainCamera.transform.position);
+
+        for (int i = 0; i < lodLevels.Length; i++)
+        {
+            if (distance <= lodDistances[i])
+            {
+                ActivateLOD(i);
+                break;
+            }
+        }
+    }
+
+    void ActivateLOD(int level)
+    {
+        for (int i = 0; i < lodLevels.Length; i++)
+        {
+            lodLevels[i].gameObject.SetActive(i == level);
+        }
+    }
+}
+```
+
+### Occlusion Culling
+
+```csharp
+using UnityEngine;
+
+public class OcclusionCullingSetup : MonoBehaviour
+{
+    public bool useOcclusionCulling = true;
+
+    void Start()
+    {
+        SetupOcclusionCulling();
+    }
+
+    void SetupOcclusionCulling()
+    {
+        if (useOcclusionCulling)
+        {
+            // In the Unity editor, you would bake occlusion data
+            // This is typically done through the Lighting window
+            Debug.Log("Occlusion culling should be baked in the editor");
+        }
+    }
+}
+```
+
+## Integration with External Tools
+
+### Exporting Simulation Data
+
+```csharp
+using UnityEngine;
+using System.IO;
+using System.Collections.Generic;
+
+public class SimulationDataExporter : MonoBehaviour
+{
+    public string exportPath = "simulation_data";
+    public int frameRate = 30;
+
+    private List<SimulationFrame> simulationData = new List<SimulationFrame>();
+    private float lastExportTime;
+
+    void Start()
+    {
+        lastExportTime = Time.time;
+        Directory.CreateDirectory(exportPath);
+    }
+
+    void Update()
+    {
+        if (Time.time - lastExportTime >= 1f / frameRate)
+        {
+            CaptureFrame();
+            lastExportTime = Time.time;
+        }
+    }
+
+    void CaptureFrame()
+    {
+        SimulationFrame frame = new SimulationFrame
+        {
+            timestamp = Time.time,
+            robotPositions = new List<Vector3>(),
+            robotRotations = new List<Quaternion>()
+        };
+
+        // Capture all robot positions and rotations
+        // This would be expanded based on your robot setup
+        frame.robotPositions.Add(transform.position);
+        frame.robotRotations.Add(transform.rotation);
+
+        simulationData.Add(frame);
+
+        // Export to file periodically
+        if (simulationData.Count % 100 == 0)
+        {
+            ExportData();
+        }
+    }
+
+    void ExportData()
+    {
+        string fileName = Path.Combine(exportPath, $"simulation_data_{simulationData.Count}.json");
+        string jsonData = JsonUtility.ToJson(new SimulationDataContainer { frames = simulationData.ToArray() }, true);
+        File.WriteAllText(fileName, jsonData);
+
+        Debug.Log($"Exported {simulationData.Count} frames to {fileName}");
+    }
+
+    [System.Serializable]
+    public class SimulationFrame
+    {
+        public float timestamp;
+        public List<Vector3> robotPositions;
+        public List<Quaternion> robotRotations;
+    }
+
+    [System.Serializable]
+    public class SimulationDataContainer
+    {
+        public SimulationFrame[] frames;
+    }
+}
+```
+
+## Best Practices for Unity Robotics
+
+### 1. Performance Considerations
+- Use object pooling for frequently instantiated objects
+- Optimize mesh complexity for physics calculations
+- Implement Level of Detail (LOD) systems
+- Use occlusion culling for large environments
+- Profile regularly to identify bottlenecks
+
+### 2. Physics Optimization
+- Use appropriate collision shapes
+- Adjust physics update rates for stability
+- Configure joint limits and constraints properly
+- Use fixed time steps for consistent physics
+
+### 3. Rendering Optimization
+- Use efficient lighting techniques
+- Implement texture atlasing
+- Use shader optimization
+- Consider using URP for performance vs. HDRP for quality
+
+### 4. Data Pipeline
+- Implement proper logging and debugging
+- Create automated testing pipelines
+- Validate simulation-to-reality transfer
+- Document simulation parameters thoroughly
+
+## Troubleshooting Common Issues
+
+### Physics Instability
+- Check mass ratios between connected bodies
+- Ensure proper joint configurations
+- Adjust solver iteration counts
+- Verify center of mass positioning
+
+### Performance Issues
+- Reduce polygon count where possible
+- Use fewer real-time lights
+- Optimize material complexity
+- Consider using simpler physics approximations
+
+### ROS Communication Problems
+- Verify TCP connection settings
+- Check message serialization
+- Validate topic names and types
+- Monitor network bandwidth usage
+
+## Summary
+
+Unity provides a powerful platform for high-fidelity humanoid robot simulation, offering photorealistic rendering, advanced physics simulation, and flexible scripting capabilities. The integration with ROS through the ROS-TCP-Connector enables seamless communication between Unity and the ROS ecosystem.
+
+Key advantages of Unity for humanoid simulation include:
+- High-quality visual rendering for realistic perception simulation
+- Advanced physics engine for accurate dynamics
+- Flexible scripting system for custom behaviors
+- Extensive asset library and tooling
+- Machine learning integration through ML-Agents
+
+The combination of Unity's capabilities with ROS's robotics infrastructure creates a powerful simulation environment that bridges the gap between virtual and real-world robotics development. This high-fidelity simulation capability is essential for developing and testing humanoid robots before deployment on physical hardware.
+
+In the next module, we'll explore NVIDIA Isaac for advanced AI robotics applications, building on the simulation foundations established in this module.

@@ -1,0 +1,1182 @@
+---
+sidebar_position: 15
+title: 'Chapter 15: Reinforcement Learning & Sim-to-Real'
+---
+
+# Reinforcement Learning & Sim-to-Real
+
+## Overview
+
+Reinforcement Learning (RL) has emerged as a powerful approach for training complex robotic behaviors, particularly for humanoid robots that require sophisticated control strategies. NVIDIA Isaac provides extensive support for RL training in simulation with the goal of transferring learned policies to real robots. This chapter explores the principles and practical implementation of RL in Isaac, focusing on sim-to-real transfer techniques.
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+- Understand reinforcement learning fundamentals for robotics
+- Implement RL environments in Isaac for humanoid robots
+- Apply domain randomization techniques for sim-to-real transfer
+- Train humanoid robot policies using Isaac's RL framework
+- Evaluate and validate sim-to-real transfer performance
+- Address challenges in transferring learned behaviors
+
+## Reinforcement Learning Fundamentals for Robotics
+
+### RL in Robotics Context
+
+Reinforcement Learning in robotics involves an agent (the robot) learning to perform tasks by interacting with an environment to maximize cumulative rewards. For humanoid robots, this can include tasks like walking, balancing, manipulation, and navigation.
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Humanoid      │    │   Environment   │    │   RL Algorithm  │
+│   Robot         │    │   (Simulation   │    │   (Policy       │
+│   (Agent)       │◄──►│   or Real World)│◄──►│   Network)      │
+│                 │    │                 │    │                 │
+│ - Actions       │    │ - States        │    │ - Rewards       │
+│ - Observations  │    │ - Transitions   │    │ - Updates       │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+### Key RL Concepts for Robotics
+
+1. **State Space**: Robot configuration, sensor readings, environment state
+2. **Action Space**: Joint commands, velocities, torques
+3. **Reward Function**: Task-specific rewards for desired behaviors
+4. **Policy**: Mapping from states to actions
+5. **Environment**: Physical or simulated robot and surroundings
+
+### Challenges in Robotic RL
+
+- **Continuous Action Spaces**: High-dimensional control problems
+- **Sample Efficiency**: Expensive real-world training
+- **Safety**: Preventing damage during learning
+- **Sim-to-Real Gap**: Differences between simulation and reality
+- **Hardware Constraints**: Real-world limitations and noise
+
+## Isaac RL Framework
+
+### Isaac Gym Integration
+
+Isaac provides RL capabilities through Isaac Gym, which offers GPU-accelerated parallel environments:
+
+```python
+import torch
+import numpy as np
+from isaacgym import gymapi, gymtorch
+from isaacgym.torch_utils import *
+import torch.nn as nn
+import torch.optim as optim
+
+class IsaacHumanoidRLEnv:
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.device = cfg.device
+        self.num_envs = cfg.num_envs
+        self.num_obs = cfg.num_obs
+        self.num_acts = cfg.num_acts
+        self.max_episode_length = cfg.max_episode_length
+
+        # Initialize gym
+        self.gym = gymapi.acquire_gym()
+        self.sim = None
+        self.envs = []
+        self.actor_handles = []
+
+        # RL parameters
+        self.reset_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        self.progress_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        self.extras = {}
+
+        # Initialize environments
+        self._create_envs()
+
+    def _create_envs(self):
+        """Create simulation environments"""
+        # Create simulation
+        self.sim = self.gym.create_sim(
+            device_id=0,
+            gpu_device_id=0,
+            pipeline='graphics'
+        )
+
+        # Configure simulation
+        sim_params = gymapi.SimParams()
+        sim_params.up_axis = gymapi.UP_AXIS_Z
+        sim_params.gravity = gymapi.Vec3(0.0, 0.0, -9.81)
+
+        # Set physics parameters
+        sim_params.physx.solver_type = 1
+        sim_params.physx.num_position_iterations = 8
+        sim_params.physx.num_velocity_iterations = 1
+        sim_params.physx.max_gpu_contact_pairs = 2**23
+        sim_params.physx.num_threads = 4
+        sim_params.physx.rest_offset = 0.0
+        sim_params.physx.contact_offset = 0.02
+        sim_params.physx.friction_offset_threshold = 0.04
+
+        self.gym.set_sim_params(self.sim, sim_params)
+
+        # Create environments
+        spacing = self.cfg.env_spacing
+        lower = gymapi.Vec3(-spacing, -spacing, 0.0)
+        upper = gymapi.Vec3(spacing, spacing, spacing)
+
+        for i in range(self.num_envs):
+            env = self.gym.create_env(self.sim, lower, upper, 1)
+            self.envs.append(env)
+
+            # Load humanoid robot asset
+            asset_root = self.cfg.asset_root
+            asset_file = self.cfg.asset_file
+
+            asset_options = gymapi.AssetOptions()
+            asset_options.fix_base_link = False
+            asset_options.default_dof_drive_mode = gymapi.DOF_MODE_EFFORT
+            asset_options.set_collision_filter(1, 1)
+            asset_options.override_inertia = True
+
+            humanoid_asset = self.gym.load_asset(
+                self.sim, asset_root, asset_file, asset_options
+            )
+
+            # Create actor
+            pose = gymapi.Transform()
+            pose.p = gymapi.Vec3(0.0, 0.0, 1.0)
+            pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
+
+            actor = self.gym.create_actor(
+                env, humanoid_asset, pose, "humanoid", i, 1, 1
+            )
+            self.actor_handles.append(actor)
+
+            # Set DOF properties
+            dof_props = self.gym.get_actor_dof_properties(env, actor)
+            dof_props['driveMode'].fill(gymapi.DOF_MODE_EFFORT)
+            dof_props['stiffness'] = self.cfg.dof_stiffness
+            dof_props['damping'] = self.cfg.dof_damping
+            self.gym.set_actor_dof_properties(env, actor, dof_props)
+
+    def reset_idx(self, env_ids):
+        """Reset environments with specific indices"""
+        positions = 0.1 * (torch.rand((len(env_ids), self.num_acts), device=self.device) - 0.5)
+        velocities = 0.1 * (torch.rand((len(env_ids), self.num_acts), device=self.device) - 0.5)
+
+        # Set new DOF states
+        self.root_tensor[env_ids, 7:13] = 0.0  # Zero velocities
+        self.dof_state_tensor[env_ids, :self.num_acts] = positions
+        self.dof_state_tensor[env_ids, self.num_acts:] = velocities
+
+        # Reset buffers
+        self.reset_buf[env_ids] = 0
+        self.progress_buf[env_ids] = 0
+
+    def pre_physics_step(self, actions):
+        """Apply actions before physics simulation"""
+        # Scale actions
+        actions_tensor = torch.clamp(actions, -1.0, 1.0)
+
+        # Apply actions to DOF actuators
+        self.forces = actions_tensor * self.cfg.action_scale
+
+        # Set DOF efforts
+        self.gym.set_dof_actuation_force_tensor(
+            self.sim, gymtorch.unwrap_tensor(self.forces)
+        )
+
+    def post_physics_step(self):
+        """Process physics simulation results"""
+        self.gym.fetch_results(self.sim, True)
+        self.gym.step_graphics(self.sim)
+        self.gym.render_all_camera_sensors(self.sim)
+        self.gym.start_access_image_tensors(self.sim)
+
+        # Get state information
+        self.gym.refresh_dof_state_tensor(self.sim)
+        self.gym.refresh_actor_root_state_tensor(self.sim)
+        self.gym.refresh_force_sensor_tensor(self.sim)
+        self.gym.refresh_dof_force_tensor(self.sim)
+
+        # Compute observations, rewards, resets
+        self.compute_observations()
+        self.compute_rewards()
+        self.compute_resets()
+
+        self.gym.end_access_image_tensors(self.sim)
+
+    def compute_observations(self):
+        """Compute observations for all environments"""
+        # Example observation: joint positions, velocities, root pose
+        joint_pos = self.dof_state_tensor[:, :self.num_acts, 0]
+        joint_vel = self.dof_state_tensor[:, :self.num_acts, 1]
+        root_pos = self.root_tensor[:, :3]
+        root_rot = self.root_tensor[:, 3:7]
+        root_vel = self.root_tensor[:, 7:10]
+        root_ang_vel = self.root_tensor[:, 10:13]
+
+        # Normalize and concatenate observations
+        obs = torch.cat([
+            joint_pos,
+            joint_vel * 0.01,  # Scale velocities
+            root_rot,
+            root_vel * 0.01,  # Scale velocities
+            root_ang_vel * 0.01  # Scale angular velocities
+        ], dim=-1)
+
+        self.obs_buf = obs
+
+    def compute_rewards(self):
+        """Compute rewards for all environments"""
+        # Example reward: forward velocity + alive bonus - action penalty
+        root_vel = self.root_tensor[:, 7]
+        alive_reward = torch.ones_like(root_vel) * 2.0
+        forward_reward = root_vel * 3.0
+        action_penalty = torch.sum(torch.square(self.last_actions), dim=-1) * 0.01
+
+        rewards = alive_reward + forward_reward - action_penalty
+        self.rew_buf = rewards
+
+    def compute_resets(self):
+        """Compute resets for all environments"""
+        resets = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+
+        # Reset if humanoid falls
+        root_pos_z = self.root_tensor[:, 2]
+        fall_threshold = 0.3
+        resets = root_pos_z < fall_threshold
+
+        # Reset if episode length exceeded
+        resets = resets | (self.progress_buf >= self.max_episode_length - 1)
+
+        self.reset_buf = resets
+
+    def step(self, actions):
+        """Execute one simulation step"""
+        self.pre_physics_step(actions)
+
+        # Step simulation
+        for _ in range(self.cfg.sim_steps_per_control_step):
+            self.gym.simulate(self.sim)
+
+        self.post_physics_step()
+
+        # Update buffers
+        self.last_actions = actions.clone()
+        self.progress_buf += 1
+
+        return self.obs_buf, self.rew_buf, self.reset_buf, self.extras
+
+    def reset(self):
+        """Reset all environments"""
+        env_ids = torch.arange(self.num_envs, device=self.device, dtype=torch.long)
+        self.reset_idx(env_ids)
+        return self.obs_buf
+```
+
+## Deep Reinforcement Learning Implementation
+
+### Actor-Critic Network Architecture
+
+```python
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class HumanoidActorCritic(nn.Module):
+    def __init__(self, num_obs, num_acts, actor_hidden_dims=[512, 256, 128],
+                 critic_hidden_dims=[512, 256, 128], activation='elu'):
+        super(HumanoidActorCritic, self).__init__()
+
+        # Activation function
+        if activation == 'elu':
+            activation_fn = nn.ELU
+        elif activation == 'tanh':
+            activation_fn = nn.Tanh
+        elif activation == 'relu':
+            activation_fn = nn.ReLU
+        else:
+            raise ValueError(f"Unknown activation function: {activation}")
+
+        # Actor network
+        actor_layers = []
+        actor_layers.append(nn.Linear(num_obs, actor_hidden_dims[0]))
+        actor_layers.append(activation_fn())
+
+        for i in range(len(actor_hidden_dims) - 1):
+            actor_layers.append(nn.Linear(actor_hidden_dims[i], actor_hidden_dims[i+1]))
+            actor_layers.append(activation_fn())
+
+        actor_layers.append(nn.Linear(actor_hidden_dims[-1], num_acts))
+        actor_layers.append(nn.Tanh())  # Output in [-1, 1] range
+
+        self.actor = nn.Sequential(*actor_layers)
+
+        # Critic network
+        critic_layers = []
+        critic_layers.append(nn.Linear(num_obs, critic_hidden_dims[0]))
+        critic_layers.append(activation_fn())
+
+        for i in range(len(critic_hidden_dims) - 1):
+            critic_layers.append(nn.Linear(critic_hidden_dims[i], critic_hidden_dims[i+1]))
+            critic_layers.append(activation_fn())
+
+        critic_layers.append(nn.Linear(critic_hidden_dims[-1], 1))
+
+        self.critic = nn.Sequential(*critic_layers)
+
+        # Initialize network weights
+        self.init_weights()
+
+    def init_weights(self):
+        """Initialize network weights"""
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.orthogonal_(m.weight, gain=0.01)
+                nn.init.zeros_(m.bias)
+
+    def forward(self, obs):
+        """Forward pass for both actor and critic"""
+        return self.actor(obs), self.critic(obs)
+
+    def get_actions(self, obs):
+        """Get actions from actor network"""
+        return self.actor(obs)
+
+    def get_value(self, obs):
+        """Get value from critic network"""
+        return self.critic(obs)
+
+class HumanoidPPOAgent:
+    def __init__(self, obs_dim, act_dim, lr=3e-4, gamma=0.99, lam=0.95,
+                 clip_param=0.2, epochs=10, mini_batch_size=64):
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        # Networks
+        self.actor_critic = HumanoidActorCritic(obs_dim, act_dim).to(self.device)
+        self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=lr)
+
+        # Hyperparameters
+        self.gamma = gamma
+        self.lam = lam
+        self.clip_param = clip_param
+        self.epochs = epochs
+        self.mini_batch_size = mini_batch_size
+
+    def update(self, buffer):
+        """Update policy using PPO algorithm"""
+        # Get data from buffer
+        obs_batch = buffer['obs'].to(self.device)
+        act_batch = buffer['actions'].to(self.device)
+        ret_batch = buffer['returns'].to(self.device)
+        adv_batch = buffer['advantages'].to(self.device)
+        old_log_prob_batch = buffer['log_probs'].to(self.device)
+
+        # Normalize advantages
+        adv_batch = (adv_batch - adv_batch.mean()) / (adv_batch.std() + 1e-8)
+
+        for _ in range(self.epochs):
+            # Get current policy values
+            mu, values = self.actor_critic(obs_batch)
+
+            # Calculate new log probabilities
+            dist = torch.distributions.Normal(mu, 1.0)  # Fixed std for simplicity
+            new_log_prob = dist.log_prob(act_batch).sum(dim=-1)
+
+            # Calculate ratio
+            ratio = torch.exp(new_log_prob - old_log_prob_batch)
+
+            # Calculate surrogate objectives
+            surr1 = ratio * adv_batch
+            surr2 = torch.clamp(ratio, 1.0 - self.clip_param, 1.0 + self.clip_param) * adv_batch
+            actor_loss = -torch.min(surr1, surr2).mean()
+
+            # Value loss
+            value_loss = F.mse_loss(values.squeeze(), ret_batch)
+
+            # Total loss
+            total_loss = actor_loss + 0.5 * value_loss
+
+            # Update networks
+            self.optimizer.zero_grad()
+            total_loss.backward()
+            # Gradient clipping
+            torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), 0.5)
+            self.optimizer.step()
+```
+
+## Domain Randomization for Sim-to-Real Transfer
+
+### Physics Parameter Randomization
+
+```python
+import numpy as np
+
+class DomainRandomizer:
+    def __init__(self, env):
+        self.env = env
+        self.randomization_params = {
+            'mass': {'range': [0.8, 1.2], 'distribution': 'uniform'},
+            'friction': {'range': [0.5, 1.5], 'distribution': 'uniform'},
+            'restitution': {'range': [0.0, 0.2], 'distribution': 'uniform'},
+            'damping': {'range': [0.8, 1.2], 'distribution': 'uniform'},
+            'stiffness': {'range': [0.8, 1.2], 'distribution': 'uniform'},
+            'gravity': {'range': [-9.81*1.1, -9.81*0.9], 'distribution': 'uniform'},
+            'delay': {'range': [0, 2], 'distribution': 'uniform'},  # Control delay in steps
+        }
+
+    def randomize_env(self, env_id):
+        """Randomize physics parameters for a specific environment"""
+        # Randomize robot mass
+        mass_range = self.randomization_params['mass']['range']
+        mass_ratio = np.random.uniform(mass_range[0], mass_range[1])
+
+        # Get actor properties and modify mass
+        props = self.env.gym.get_actor_rigid_body_properties(self.env.envs[env_id], self.env.actor_handles[env_id])
+        for prop in props:
+            prop.mass *= mass_ratio
+        self.env.gym.set_actor_rigid_body_properties(self.env.envs[env_id], self.env.actor_handles[env_id], props)
+
+        # Randomize joint damping
+        dof_props = self.env.gym.get_actor_dof_properties(self.env.envs[env_id], self.env.actor_handles[env_id])
+        damping_range = self.randomization_params['damping']['range']
+        for i in range(len(dof_props['damping'])):
+            random_damping = dof_props['damping'][i] * np.random.uniform(damping_range[0], damping_range[1])
+            dof_props['damping'][i] = random_damping
+        self.env.gym.set_actor_dof_properties(self.env.envs[env_id], self.env.actor_handles[env_id], dof_props)
+
+        # Randomize joint stiffness
+        stiffness_range = self.randomization_params['stiffness']['range']
+        for i in range(len(dof_props['stiffness'])):
+            random_stiffness = dof_props['stiffness'][i] * np.random.uniform(stiffness_range[0], stiffness_range[1])
+            dof_props['stiffness'][i] = random_stiffness
+        self.env.gym.set_actor_dof_properties(self.env.envs[env_id], self.env.actor_handles[env_id], dof_props)
+
+    def randomize_sensor_noise(self):
+        """Add random sensor noise"""
+        noise_scale = np.random.uniform(0.0, 0.1)  # Scale of noise
+        return noise_scale
+
+    def randomize_control_delay(self):
+        """Randomize control delay"""
+        delay_steps = np.random.uniform(
+            self.randomization_params['delay']['range'][0],
+            self.randomization_params['delay']['range'][1]
+        )
+        return int(delay_steps)
+
+    def apply_randomization(self, env_ids):
+        """Apply randomization to specified environments"""
+        for env_id in env_ids:
+            self.randomize_env(env_id)
+```
+
+### Visual Domain Randomization
+
+```python
+import torch
+import torch.nn.functional as F
+
+class VisualDomainRandomizer:
+    def __init__(self):
+        self.visual_params = {
+            'brightness': {'range': [0.5, 1.5], 'prob': 0.5},
+            'contrast': {'range': [0.8, 1.2], 'prob': 0.5},
+            'saturation': {'range': [0.8, 1.2], 'prob': 0.5},
+            'hue': {'range': [-0.1, 0.1], 'prob': 0.3},
+            'noise': {'range': [0.0, 0.1], 'prob': 0.5},
+            'blur': {'range': [0.0, 2.0], 'prob': 0.3},
+        }
+
+    def randomize_image(self, image_tensor):
+        """Apply visual domain randomization to image tensor"""
+        # Random brightness
+        if torch.rand(1) < self.visual_params['brightness']['prob']:
+            brightness_factor = torch.rand(1) * (
+                self.visual_params['brightness']['range'][1] -
+                self.visual_params['brightness']['range'][0]
+            ) + self.visual_params['brightness']['range'][0]
+            image_tensor = image_tensor * brightness_factor
+
+        # Random contrast
+        if torch.rand(1) < self.visual_params['contrast']['prob']:
+            # Convert to grayscale to calculate mean
+            mean = torch.mean(image_tensor, dim=[1, 2, 3], keepdim=True)
+            contrast_factor = torch.rand(1) * (
+                self.visual_params['contrast']['range'][1] -
+                self.visual_params['contrast']['range'][0]
+            ) + self.visual_params['contrast']['range'][0]
+            image_tensor = (image_tensor - mean) * contrast_factor + mean
+
+        # Random saturation
+        if torch.rand(1) < self.visual_params['saturation']['prob']:
+            # Convert to grayscale
+            gray = torch.mean(image_tensor, dim=1, keepdim=True)
+            saturation_factor = torch.rand(1) * (
+                self.visual_params['saturation']['range'][1] -
+                self.visual_params['saturation']['range'][0]
+            ) + self.visual_params['saturation']['range'][0]
+            image_tensor = gray + (image_tensor - gray) * saturation_factor
+
+        # Random noise
+        if torch.rand(1) < self.visual_params['noise']['prob']:
+            noise_factor = torch.rand(1) * (
+                self.visual_params['noise']['range'][1] -
+                self.visual_params['noise']['range'][0]
+            ) + self.visual_params['noise']['range'][0]
+            noise = torch.randn_like(image_tensor) * noise_factor
+            image_tensor = torch.clamp(image_tensor + noise, 0, 1)
+
+        # Clamp values
+        image_tensor = torch.clamp(image_tensor, 0, 1)
+        return image_tensor
+```
+
+## Isaac RL Training Loop
+
+### Complete Training Implementation
+
+```python
+import os
+import pickle
+import torch
+import numpy as np
+from collections import deque
+
+class IsaacRLTrainer:
+    def __init__(self, env, agent, max_iterations=1000):
+        self.env = env
+        self.agent = agent
+        self.max_iterations = max_iterations
+
+        # Training statistics
+        self.episode_rewards = deque(maxlen=100)
+        self.episode_lengths = deque(maxlen=100)
+        self.mean_reward = 0
+        self.mean_length = 0
+
+        # Checkpoint directory
+        self.checkpoint_dir = "checkpoints"
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+
+    def train(self):
+        """Main training loop"""
+        obs = self.env.reset()
+        episode_reward = 0
+        episode_length = 0
+
+        for iteration in range(self.max_iterations):
+            # Collect trajectories
+            trajectory = self.collect_trajectory(obs)
+
+            # Update policy
+            self.agent.update(trajectory)
+
+            # Update statistics
+            self.update_statistics(trajectory)
+
+            # Log progress
+            if iteration % 10 == 0:
+                self.log_progress(iteration)
+
+            # Save checkpoint
+            if iteration % 100 == 0:
+                self.save_checkpoint(iteration)
+
+            # Reset environment if needed
+            obs = self.env.reset()
+
+    def collect_trajectory(self, initial_obs):
+        """Collect trajectory data for training"""
+        obs_buffer = []
+        act_buffer = []
+        rew_buffer = []
+        done_buffer = []
+        log_prob_buffer = []
+
+        obs = initial_obs
+        for _ in range(self.env.max_episode_length):
+            # Get action from policy
+            with torch.no_grad():
+                action = self.agent.actor_critic.get_actions(obs)
+                # Add noise for exploration
+                action = action + torch.randn_like(action) * 0.1
+                action = torch.clamp(action, -1, 1)
+
+                # Get log probability
+                dist = torch.distributions.Normal(
+                    self.agent.actor_critic.actor(obs), 1.0
+                )
+                log_prob = dist.log_prob(action).sum(dim=-1)
+
+            # Store data
+            obs_buffer.append(obs.clone())
+            act_buffer.append(action.clone())
+            log_prob_buffer.append(log_prob.clone())
+
+            # Step environment
+            obs, reward, done, info = self.env.step(action)
+
+            rew_buffer.append(reward.clone())
+            done_buffer.append(done.clone())
+
+            if torch.any(done):
+                break
+
+        # Convert to tensors
+        trajectory = {
+            'obs': torch.stack(obs_buffer),
+            'actions': torch.stack(act_buffer),
+            'rewards': torch.stack(rew_buffer),
+            'dones': torch.stack(done_buffer),
+            'log_probs': torch.stack(log_prob_buffer)
+        }
+
+        # Compute returns and advantages
+        trajectory = self.compute_returns_advantages(trajectory)
+
+        return trajectory
+
+    def compute_returns_advantages(self, trajectory):
+        """Compute returns and advantages for PPO"""
+        rewards = trajectory['rewards']
+        dones = trajectory['dones']
+        values = []
+
+        # Get values from critic
+        with torch.no_grad():
+            for obs in trajectory['obs']:
+                value = self.agent.actor_critic.get_value(obs)
+                values.append(value)
+
+        values = torch.stack(values).squeeze(-1)
+
+        # Compute advantages and returns
+        advantages = torch.zeros_like(rewards)
+        returns = torch.zeros_like(rewards)
+
+        gae = 0
+        for t in reversed(range(len(rewards))):
+            if t == len(rewards) - 1:
+                next_value = 0  # Terminal state
+            else:
+                next_value = values[t + 1]
+
+            # Compute TD error
+            delta = rewards[t] + self.agent.gamma * next_value * (1 - dones[t]) - values[t]
+
+            # Compute GAE
+            gae = delta + self.agent.gamma * self.agent.lam * (1 - dones[t]) * gae
+            advantages[t] = gae
+
+            # Compute return
+            returns[t] = gae + values[t]
+
+        trajectory['advantages'] = advantages
+        trajectory['returns'] = returns
+
+        return trajectory
+
+    def update_statistics(self, trajectory):
+        """Update training statistics"""
+        rewards = trajectory['rewards'].sum(dim=0)  # Sum over time steps
+        lengths = torch.sum(1 - trajectory['dones'].float(), dim=0)  # Episode lengths
+
+        self.episode_rewards.extend(rewards.cpu().numpy())
+        self.episode_lengths.extend(lengths.cpu().numpy())
+
+        if len(self.episode_rewards) > 0:
+            self.mean_reward = np.mean(self.episode_rewards)
+            self.mean_length = np.mean(self.episode_lengths)
+
+    def log_progress(self, iteration):
+        """Log training progress"""
+        print(f"Iteration {iteration}: "
+              f"Mean Reward: {self.mean_reward:.2f}, "
+              f"Mean Length: {self.mean_length:.2f}")
+
+    def save_checkpoint(self, iteration):
+        """Save model checkpoint"""
+        checkpoint_path = os.path.join(
+            self.checkpoint_dir, f"checkpoint_{iteration}.pth"
+        )
+
+        torch.save({
+            'iteration': iteration,
+            'model_state_dict': self.agent.actor_critic.state_dict(),
+            'optimizer_state_dict': self.agent.optimizer.state_dict(),
+            'mean_reward': self.mean_reward,
+        }, checkpoint_path)
+
+        print(f"Checkpoint saved: {checkpoint_path}")
+```
+
+## Sim-to-Real Transfer Techniques
+
+### System Identification and Modeling
+
+```python
+import numpy as np
+from scipy import optimize
+
+class SystemIdentifier:
+    def __init__(self, robot_model):
+        self.robot_model = robot_model
+        self.parameters = {}
+
+    def identify_dynamics(self, real_data, sim_data):
+        """Identify dynamics parameters by fitting simulation to real data"""
+        # Define objective function to minimize difference between real and sim
+        def objective(params):
+            # Set simulation parameters
+            self.set_simulation_params(params)
+
+            # Run simulation with same inputs as real experiment
+            sim_output = self.run_simulation(real_data['inputs'])
+
+            # Calculate error between real and simulated outputs
+            error = np.mean((real_data['outputs'] - sim_output) ** 2)
+            return error
+
+        # Initial parameter guess
+        initial_params = self.get_initial_params()
+
+        # Optimize parameters
+        result = optimize.minimize(objective, initial_params, method='BFGS')
+
+        self.parameters = result.x
+        return result.x
+
+    def get_initial_params(self):
+        """Get initial parameter estimates"""
+        # Return initial estimates for masses, inertias, friction, etc.
+        return np.array([1.0, 0.5, 0.1])  # Placeholder values
+
+    def set_simulation_params(self, params):
+        """Set simulation parameters"""
+        # Update simulation with identified parameters
+        pass
+
+    def run_simulation(self, inputs):
+        """Run simulation with given inputs"""
+        # Execute simulation and return outputs
+        return np.zeros_like(inputs)  # Placeholder
+
+class AdaptiveController:
+    def __init__(self, nominal_controller, system_identifier):
+        self.nominal_controller = nominal_controller
+        self.system_identifier = system_identifier
+        self.adaptation_gain = 0.01
+
+    def compute_control(self, state, reference, real_data=None):
+        """Compute control with adaptation"""
+        # Compute nominal control
+        nominal_control = self.nominal_controller.compute(state, reference)
+
+        # If real data is available, adapt controller
+        if real_data is not None:
+            adaptation_term = self.adapt_control_with_real_data(state, real_data)
+            final_control = nominal_control + adaptation_term
+        else:
+            final_control = nominal_control
+
+        return final_control
+
+    def adapt_control_with_real_data(self, state, real_data):
+        """Adapt control based on real-world data"""
+        # Implement adaptive control law
+        # This could be model reference adaptive control, etc.
+        return np.zeros_like(state)  # Placeholder
+```
+
+### Robust Control Design
+
+```python
+import numpy as np
+from scipy import linalg
+
+class RobustController:
+    def __init__(self, nominal_model, uncertainty_bounds):
+        self.nominal_model = nominal_model
+        self.uncertainty_bounds = uncertainty_bounds
+
+    def design_robust_controller(self):
+        """Design robust controller using H-infinity or mu-synthesis"""
+        # This would implement advanced robust control design
+        # For simplicity, implementing a basic robust PID controller
+
+        # Robust PID gains based on uncertainty bounds
+        self.kp = self.calculate_robust_gain('P')
+        self.ki = self.calculate_robust_gain('I')
+        self.kd = self.calculate_robust_gain('D')
+
+    def calculate_robust_gain(self, type):
+        """Calculate robust gain based on uncertainty"""
+        # Simplified robust gain calculation
+        if type == 'P':
+            return 1.0 / (1 + self.uncertainty_bounds['parametric'])
+        elif type == 'I':
+            return 0.1 / (1 + self.uncertainty_bounds['parametric'])
+        elif type == 'D':
+            return 0.01 / (1 + self.uncertainty_bounds['parametric'])
+
+    def compute_control(self, error, error_integral, error_derivative):
+        """Compute robust control output"""
+        p_term = self.kp * error
+        i_term = self.ki * error_integral
+        d_term = self.kd * error_derivative
+
+        return p_term + i_term + d_term
+
+class GainScheduledController:
+    def __init__(self):
+        self.gain_schedule = self.create_gain_schedule()
+
+    def create_gain_schedule(self):
+        """Create gain schedule based on operating conditions"""
+        # Define different gain sets for different conditions
+        # e.g., different walking speeds, terrain types, etc.
+        schedule = {
+            'slow_walking': {'kp': 1.0, 'ki': 0.1, 'kd': 0.05},
+            'fast_walking': {'kp': 1.5, 'ki': 0.2, 'kd': 0.1},
+            'standing': {'kp': 2.0, 'ki': 0.3, 'kd': 0.15}
+        }
+        return schedule
+
+    def get_gains(self, condition):
+        """Get gains for current operating condition"""
+        return self.gain_schedule.get(condition, self.gain_schedule['standing'])
+```
+
+## Transfer Validation and Testing
+
+### Performance Metrics
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+class TransferValidator:
+    def __init__(self):
+        self.metrics = {}
+
+    def validate_transfer(self, sim_policy, real_robot):
+        """Validate policy transfer from simulation to reality"""
+        # Collect performance data from both sim and real
+        sim_performance = self.evaluate_policy(sim_policy, 'simulation')
+        real_performance = self.evaluate_policy(sim_policy, 'real')
+
+        # Calculate sim-to-real gap metrics
+        self.metrics['reward_gap'] = real_performance['reward'] - sim_performance['reward']
+        self.metrics['success_rate_gap'] = real_performance['success_rate'] - sim_performance['success_rate']
+        self.metrics['stability_gap'] = real_performance['stability'] - sim_performance['stability']
+
+        return self.metrics
+
+    def evaluate_policy(self, policy, environment):
+        """Evaluate policy in specified environment"""
+        if environment == 'simulation':
+            # Evaluate in Isaac simulation
+            performance = self.evaluate_in_simulation(policy)
+        else:
+            # Evaluate on real robot
+            performance = self.evaluate_on_real_robot(policy)
+
+        return performance
+
+    def evaluate_in_simulation(self, policy):
+        """Evaluate policy in Isaac simulation"""
+        # Run multiple episodes and collect statistics
+        rewards = []
+        success_rates = []
+        stability_metrics = []
+
+        for episode in range(100):  # Run 100 episodes
+            episode_reward = 0
+            steps = 0
+            success = True
+
+            # Reset environment
+            obs = self.reset_simulation()
+
+            for step in range(1000):  # Max 1000 steps per episode
+                action = policy.get_action(obs)
+                obs, reward, done, info = self.step_simulation(action)
+
+                episode_reward += reward
+                steps += 1
+
+                # Check for failure conditions
+                if self.check_failure_conditions(info):
+                    success = False
+                    break
+
+                if done:
+                    break
+
+            rewards.append(episode_reward)
+            success_rates.append(1.0 if success else 0.0)
+            stability_metrics.append(self.calculate_stability(obs))
+
+        return {
+            'reward': np.mean(rewards),
+            'success_rate': np.mean(success_rates),
+            'stability': np.mean(stability_metrics)
+        }
+
+    def evaluate_on_real_robot(self, policy):
+        """Evaluate policy on real robot (simplified)"""
+        # This would interface with the real robot
+        # For simulation, return dummy values
+        return {
+            'reward': 0.0,  # Placeholder
+            'success_rate': 0.0,  # Placeholder
+            'stability': 0.0  # Placeholder
+        }
+
+    def check_failure_conditions(self, info):
+        """Check if episode should end due to failure"""
+        # Check for robot falling, joint limits, etc.
+        return False  # Placeholder
+
+    def calculate_stability(self, obs):
+        """Calculate stability metric from observations"""
+        # Calculate based on robot state (orientation, velocity, etc.)
+        return 1.0  # Placeholder
+
+class TransferAnalyzer:
+    def __init__(self):
+        self.analysis_results = {}
+
+    def analyze_transfer_gap(self, sim_data, real_data):
+        """Analyze the gap between simulation and real performance"""
+        # Compare distributions
+        self.compare_distributions(sim_data, real_data)
+
+        # Analyze specific failure modes
+        self.analyze_failure_modes(sim_data, real_data)
+
+        # Identify key factors causing transfer gap
+        self.identify_transfer_factors(sim_data, real_data)
+
+        return self.analysis_results
+
+    def compare_distributions(self, sim_data, real_data):
+        """Compare state/action distributions between sim and real"""
+        # Use statistical tests to compare distributions
+        from scipy import stats
+
+        # Compare state distributions
+        state_sim = np.array(sim_data['states'])
+        state_real = np.array(real_data['states'])
+
+        # Perform Kolmogorov-Smirnov test
+        ks_stat, p_value = stats.ks_2samp(state_sim.flatten(), state_real.flatten())
+
+        self.analysis_results['state_distribution_similarity'] = {
+            'ks_statistic': ks_stat,
+            'p_value': p_value,
+            'similar': p_value > 0.05  # If p > 0.05, distributions are similar
+        }
+
+    def analyze_failure_modes(self, sim_data, real_data):
+        """Analyze different failure modes in sim vs real"""
+        sim_failures = self.extract_failure_modes(sim_data)
+        real_failures = self.extract_failure_modes(real_data)
+
+        self.analysis_results['failure_mode_analysis'] = {
+            'sim_failures': sim_failures,
+            'real_failures': real_failures,
+            'key_differences': self.compare_failure_modes(sim_failures, real_failures)
+        }
+
+    def extract_failure_modes(self, data):
+        """Extract failure modes from data"""
+        # Analyze data to identify common failure patterns
+        return []  # Placeholder
+
+    def compare_failure_modes(self, sim_failures, real_failures):
+        """Compare failure modes between sim and real"""
+        # Identify key differences in failure patterns
+        return {}  # Placeholder
+```
+
+## Practical Implementation Guidelines
+
+### Best Practices for Sim-to-Real Transfer
+
+```python
+class TransferBestPractices:
+    def __init__(self):
+        self.guidelines = self.get_guidelines()
+
+    def get_guidelines(self):
+        """Get comprehensive guidelines for sim-to-real transfer"""
+        return {
+            'simulation_fidelity': {
+                'description': 'Ensure simulation captures essential dynamics',
+                'recommendations': [
+                    'Model contact dynamics accurately',
+                    'Include sensor noise and delays',
+                    'Match control frequencies',
+                    'Validate basic behaviors in sim'
+                ]
+            },
+            'domain_randomization': {
+                'description': 'Use broad randomization to improve robustness',
+                'recommendations': [
+                    'Randomize physics parameters widely',
+                    'Include visual domain randomization',
+                    'Randomize environment conditions',
+                    'Test robustness to parameter changes'
+                ]
+            },
+            'policy_robustness': {
+                'description': 'Design policies that are robust to uncertainties',
+                'recommendations': [
+                    'Use conservative reward shaping',
+                    'Include safety constraints',
+                    'Test on diverse environments',
+                    'Implement failure recovery'
+                ]
+            },
+            'validation_protocol': {
+                'description': 'Systematic validation before real deployment',
+                'recommendations': [
+                    'Test on multiple simulated robots',
+                    'Validate on hardware-in-the-loop',
+                    'Start with safe behaviors',
+                    'Gradually increase complexity'
+                ]
+            }
+        }
+
+    def apply_guidelines(self, rl_agent, env):
+        """Apply best practices to RL agent and environment"""
+        # Implement conservative reward shaping
+        self.conservative_reward_shaping(rl_agent)
+
+        # Add safety constraints
+        self.add_safety_constraints(rl_agent)
+
+        # Enable domain randomization
+        self.enable_domain_randomization(env)
+
+        # Implement monitoring
+        self.setup_monitoring(rl_agent, env)
+
+    def conservative_reward_shaping(self, agent):
+        """Implement conservative reward shaping for safety"""
+        # Modify reward function to penalize aggressive actions
+        # Encourage stable, safe behaviors
+        pass
+
+    def add_safety_constraints(self, agent):
+        """Add safety constraints to policy"""
+        # Implement constraint-based policy optimization
+        # or use control barrier functions
+        pass
+
+    def enable_domain_randomization(self, env):
+        """Enable comprehensive domain randomization"""
+        # Set up randomization ranges for all relevant parameters
+        pass
+
+    def setup_monitoring(self, agent, env):
+        """Set up monitoring for safe deployment"""
+        # Implement safety monitoring and intervention
+        pass
+```
+
+## Troubleshooting and Debugging
+
+### Common Issues and Solutions
+
+```python
+class TransferTroubleshooter:
+    def __init__(self):
+        self.issues = self.get_common_issues()
+
+    def get_common_issues(self):
+        """Get common sim-to-real transfer issues"""
+        return {
+            'reality_gap': {
+                'symptoms': [
+                    'Policy works in sim but fails on real robot',
+                    'Performance degrades significantly',
+                    'Different failure modes observed'
+                ],
+                'causes': [
+                    'Inaccurate simulation models',
+                    'Missing physics effects',
+                    'Sensor discrepancies',
+                    'Actuator limitations'
+                ],
+                'solutions': [
+                    'Improve simulation fidelity',
+                    'Increase domain randomization',
+                    'System identification',
+                    'Robust control design'
+                ]
+            },
+            'sample_efficiency': {
+                'symptoms': [
+                    'Long training times',
+                    'Poor data utilization',
+                    'Overfitting to simulation'
+                ],
+                'causes': [
+                    'Large sim-to-real gap',
+                    'Inefficient exploration',
+                    'Poor reward design'
+                ],
+                'solutions': [
+                    'Use transfer learning',
+                    'Implement curriculum learning',
+                    'Improve reward shaping',
+                    'Use model-based RL'
+                ]
+            },
+            'safety_concerns': {
+                'symptoms': [
+                    'Unsafe behaviors during learning',
+                    'Damage to robot/hardware',
+                    'Unpredictable actions'
+                ],
+                'causes': [
+                    'Lack of safety constraints',
+                    'Aggressive exploration',
+                    'Simulation errors'
+                ],
+                'solutions': [
+                    'Implement safety barriers',
+                    'Use safe exploration methods',
+                    'Gradual deployment',
+                    'Human oversight'
+                ]
+            }
+        }
+
+    def diagnose_issue(self, symptoms):
+        """Diagnose issue based on symptoms"""
+        for issue_name, issue_info in self.issues.items():
+            matching_symptoms = set(symptoms) & set(issue_info['symptoms'])
+            if len(matching_symptoms) > len(issue_info['symptoms']) * 0.3:  # 30% match
+                return {
+                    'issue': issue_name,
+                    'confidence': len(matching_symptoms) / len(issue_info['symptoms']),
+                    'solutions': issue_info['solutions']
+                }
+        return None
+```
+
+## Summary
+
+Reinforcement Learning with Isaac provides a powerful framework for training complex humanoid robot behaviors in simulation with the goal of transferring these capabilities to real robots. The key to successful sim-to-real transfer lies in:
+
+1. **High-fidelity simulation**: Creating accurate models that capture essential robot dynamics
+2. **Domain randomization**: Training policies to be robust across various conditions
+3. **System identification**: Understanding and modeling the differences between sim and real
+4. **Robust control design**: Implementing controllers that can handle uncertainties
+5. **Gradual deployment**: Systematically validating and transferring learned behaviors
+
+The Isaac platform's GPU-accelerated simulation capabilities enable efficient training of complex humanoid behaviors that would be impractical to learn directly on hardware. By combining advanced RL algorithms with comprehensive domain randomization and careful validation protocols, it's possible to achieve successful sim-to-real transfer for sophisticated humanoid robot tasks.
+
+In the next module, we'll explore Vision-Language-Action (VLA) systems, which represent the cutting edge of AI-driven humanoid robotics, integrating perception, language understanding, and action execution in unified frameworks.

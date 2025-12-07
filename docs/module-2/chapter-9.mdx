@@ -1,0 +1,1148 @@
+---
+sidebar_position: 9
+title: 'Chapter 9: Environment Building'
+---
+
+# Environment Building
+
+## Overview
+
+Creating realistic and diverse environments is crucial for humanoid robot simulation and testing. This chapter covers the principles and techniques for building effective simulation environments in Gazebo and other platforms, focusing on scenarios that challenge humanoid robots while providing safe and controlled testing conditions.
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+- Design and create diverse simulation environments for humanoid robots
+- Implement realistic indoor and outdoor scenarios
+- Configure environmental physics and dynamics
+- Build custom models and objects for testing
+- Integrate environments with ROS 2 workflows
+
+## Environment Design Principles
+
+### Realism vs. Performance Trade-offs
+
+When designing simulation environments for humanoid robots, there's always a trade-off between realism and computational performance:
+
+- **High-fidelity environments**: Detailed textures, complex geometry, accurate physics
+- **Performance-optimized environments**: Simplified geometry, basic textures, efficient collision models
+- **Task-specific environments**: Custom-built for specific testing scenarios
+
+### Key Considerations
+
+1. **Navigation Space**: Ensure adequate space for humanoid locomotion
+2. **Obstacle Variety**: Include different types of obstacles for comprehensive testing
+3. **Safety Margins**: Provide safe areas for robot recovery and testing
+4. **Sensor Validation**: Include features that challenge robot sensors
+5. **Scalability**: Design environments that can be easily modified and extended
+
+## Gazebo Environment Fundamentals
+
+### World File Structure
+
+A Gazebo world file is an SDF (Simulation Description Format) file that defines the entire simulation environment:
+
+```xml
+<?xml version="1.0" ?>
+<sdf version="1.7">
+  <world name="humanoid_test_world">
+    <!-- Include standard models -->
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <!-- Physics engine configuration -->
+    <physics name="default_physics" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+      <gravity>0 0 -9.8</gravity>
+    </physics>
+
+    <!-- Custom models and objects -->
+    <model name="test_obstacle">
+      <pose>2 0 0 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>0.5 0.2 0.5</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>0.5 0.2 0.5</size></box>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>
+```
+
+### Lighting and Visuals
+
+Proper lighting enhances the realism of simulation environments:
+
+```xml
+<world name="well_lit_world">
+  <!-- Sun light source -->
+  <light name="sun" type="directional">
+    <pose>0 0 10 0 0 0</pose>
+    <diffuse>0.8 0.8 0.8 1</diffuse>
+    <specular>0.2 0.2 0.2 1</specular>
+    <attenuation>
+      <range>1000</range>
+      <constant>0.9</constant>
+      <linear>0.01</linear>
+      <quadratic>0.001</quadratic>
+    </attenuation>
+    <direction>-0.3 0.3 -1</direction>
+  </light>
+
+  <!-- Additional point lights for indoor scenes -->
+  <light name="indoor_light" type="point">
+    <pose>0 0 3 0 0 0</pose>
+    <diffuse>1 1 1 1</diffuse>
+    <specular>0.5 0.5 0.5 1</specular>
+    <attenuation>
+      <range>5</range>
+      <constant>0.2</constant>
+      <linear>0.01</linear>
+      <quadratic>0.001</quadratic>
+    </attenuation>
+  </light>
+</world>
+```
+
+## Indoor Environment Construction
+
+### Basic Indoor Scene
+
+Creating an indoor environment for humanoid testing:
+
+```xml
+<?xml version="1.0" ?>
+<sdf version="1.7">
+  <world name="indoor_humanoid_world">
+    <!-- Physics configuration -->
+    <physics name="default" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <gravity>0 0 -9.8</gravity>
+    </physics>
+
+    <!-- Ground plane -->
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <!-- Indoor lighting -->
+    <light name="ceiling_light" type="point">
+      <pose>0 0 3 0 0 0</pose>
+      <diffuse>0.9 0.9 0.9 1</diffuse>
+      <attenuation>
+        <range>10</range>
+        <constant>0.1</constant>
+        <linear>0.005</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+    </light>
+
+    <!-- Walls -->
+    <model name="wall_north">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>20 0.2 3</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>20 0.2 3</size></box>
+          </geometry>
+          <material>
+            <script>Gazebo/White</script>
+          </material>
+        </visual>
+      </link>
+      <pose>0 -5 1.5 0 0 0</pose>
+    </model>
+
+    <model name="wall_south">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>20 0.2 3</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>20 0.2 3</size></box>
+          </geometry>
+          <material>
+            <script>Gazebo/White</script>
+          </material>
+        </visual>
+      </link>
+      <pose>0 5 1.5 0 0 0</pose>
+    </model>
+
+    <model name="wall_east">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>0.2 10 3</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>0.2 10 3</size></box>
+          </geometry>
+          <material>
+            <script>Gazebo/White</script>
+          </material>
+        </visual>
+      </link>
+      <pose>10 0 1.5 0 0 0</pose>
+    </model>
+
+    <model name="wall_west">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>0.2 10 3</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>0.2 10 3</size></box>
+          </geometry>
+          <material>
+            <script>Gazebo/White</script>
+          </material>
+        </visual>
+      </link>
+      <pose>-10 0 1.5 0 0 0</pose>
+    </model>
+
+    <!-- Furniture for humanoid testing -->
+    <model name="table">
+      <link name="base">
+        <collision name="collision">
+          <geometry>
+            <box><size>1.2 0.6 0.8</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>1.2 0.6 0.8</size></box>
+          </geometry>
+          <material>
+            <script>Gazebo/Wood</script>
+          </material>
+        </visual>
+      </link>
+      <pose>3 0 0.4 0 0 0</pose>
+    </model>
+
+    <model name="chair">
+      <link name="base">
+        <collision name="collision">
+          <geometry>
+            <box><size>0.5 0.5 0.4</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>0.5 0.5 0.4</size></box>
+          </geometry>
+          <material>
+            <script>Gazebo/Black</script>
+          </material>
+        </visual>
+      </link>
+      <pose>2.5 -0.6 0.2 0 0 0</pose>
+    </model>
+
+    <!-- Doorway for navigation testing -->
+    <model name="door_frame">
+      <static>true</static>
+      <link name="frame">
+        <collision name="collision">
+          <geometry>
+            <box><size>0.2 2.0 2.0</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>0.2 2.0 2.0</size></box>
+          </geometry>
+          <material>
+            <script>Gazebo/White</script>
+          </material>
+        </visual>
+      </link>
+      <pose>0 -2.5 1.0 0 0 0</pose>
+    </model>
+  </world>
+</sdf>
+```
+
+### Multi-Room Environment
+
+For more complex humanoid testing, multi-room environments are useful:
+
+```xml
+<!-- Simplified multi-room layout -->
+<world name="multi_room_humanoid">
+  <!-- Physics -->
+  <physics name="default" type="ode">
+    <max_step_size>0.001</max_step_size>
+    <real_time_factor>1.0</real_time_factor>
+  </physics>
+
+  <!-- Room 1 -->
+  <model name="room1_walls">
+    <static>true</static>
+    <link name="walls">
+      <collision name="collision">
+        <geometry>
+          <mesh><uri>model://room1_walls.dae</uri></mesh>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <mesh><uri>model://room1_walls.dae</uri></mesh>
+        </geometry>
+      </visual>
+    </link>
+  </model>
+
+  <!-- Room 2 -->
+  <model name="room2_walls">
+    <static>true</static>
+    <link name="walls">
+      <collision name="collision">
+        <geometry>
+          <mesh><uri>model://room2_walls.dae</uri></mesh>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <mesh><uri>model://room2_walls.dae</uri></mesh>
+        </geometry>
+      </visual>
+    </link>
+    <pose>8 0 0 0 0 0</pose>
+  </model>
+
+  <!-- Connecting hallway -->
+  <model name="hallway">
+    <static>true</static>
+    <link name="hall">
+      <collision name="collision">
+        <geometry>
+          <box><size>2 4 2.5</size></box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <box><size>2 4 2.5</size></box>
+        </geometry>
+      </visual>
+    </link>
+    <pose>4 0 1.25 0 0 0</pose>
+  </model>
+</world>
+```
+
+## Outdoor Environment Construction
+
+### Basic Outdoor Scene
+
+Creating outdoor environments for humanoid navigation:
+
+```xml
+<?xml version="1.0" ?>
+<sdf version="1.7">
+  <world name="outdoor_humanoid_world">
+    <!-- Physics -->
+    <physics name="default" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <!-- Ground terrain -->
+    <model name="terrain">
+      <static>true</static>
+      <link name="terrain_link">
+        <collision name="collision">
+          <geometry>
+            <heightmap>
+              <uri>model://terrain.png</uri>
+              <size>50 50 10</size>
+              <pos>0 0 0</pos>
+            </heightmap>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <heightmap>
+              <uri>model://terrain.png</uri>
+              <size>50 50 10</size>
+              <pos>0 0 0</pos>
+            </heightmap>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Sun light -->
+    <light name="sun" type="directional">
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <direction>-0.3 0.3 -1</direction>
+    </light>
+
+    <!-- Obstacles for navigation testing -->
+    <model name="rock1">
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <sphere><radius>0.3</radius></sphere>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <sphere><radius>0.3</radius></sphere>
+          </geometry>
+          <material>
+            <script>Gazebo/Grey</script>
+          </material>
+        </visual>
+      </link>
+      <pose>5 2 0.3 0 0 0</pose>
+    </model>
+
+    <model name="tree1">
+      <link name="trunk">
+        <collision name="collision">
+          <geometry>
+            <cylinder><radius>0.15</radius><length>3</length></cylinder>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <cylinder><radius>0.15</radius><length>3</length></cylinder>
+          </geometry>
+          <material>
+            <script>Gazebo/Wood</script>
+          </material>
+        </visual>
+      </link>
+      <link name="leaves">
+        <collision name="collision">
+          <geometry>
+            <sphere><radius>1.0</radius></sphere>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <sphere><radius>1.0</radius></sphere>
+          </geometry>
+          <material>
+            <script>Gazebo/Green</script>
+          </material>
+        </visual>
+      </link>
+      <joint name="leaves_joint" type="fixed">
+        <parent>trunk</parent>
+        <child>leaves</child>
+        <pose>0 0 1.5 0 0 0</pose>
+      </joint>
+      <pose>8 -3 0 0 0 0</pose>
+    </model>
+
+    <!-- Path for humanoid navigation -->
+    <model name="path">
+      <static>true</static>
+      <link name="path_link">
+        <collision name="collision">
+          <geometry>
+            <box><size>10 0.1 2</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>10 0.1 2</size></box>
+          </geometry>
+          <material>
+            <script>Gazebo/Asphalt</script>
+          </material>
+        </visual>
+      </link>
+      <pose>0 0 0.05 0 0 0</pose>
+    </model>
+  </world>
+</sdf>
+```
+
+## Custom Model Creation
+
+### Creating Custom Objects
+
+For specialized testing, you may need to create custom models:
+
+#### Model Structure
+```
+models/custom_humanoid_test_object/
+├── model.sdf
+├── model.config
+└── meshes/
+    └── object.dae
+```
+
+#### model.config
+```xml
+<?xml version="1.0"?>
+<model>
+  <name>custom_humanoid_test_object</name>
+  <version>1.0</version>
+  <sdf version="1.7">model.sdf</sdf>
+  <author>
+    <name>Your Name</name>
+    <email>your.email@example.com</email>
+  </author>
+  <description>
+    Custom object for humanoid robot testing
+  </description>
+</model>
+```
+
+#### model.sdf
+```xml
+<?xml version="1.0" ?>
+<sdf version="1.7">
+  <model name="custom_humanoid_test_object">
+    <pose>0 0 0.5 0 0 0</pose>
+    <link name="object_link">
+      <inertial>
+        <mass>2.0</mass>
+        <inertia>
+          <ixx>0.1</ixx>
+          <ixy>0.0</ixy>
+          <ixz>0.0</ixz>
+          <iyy>0.1</iyy>
+          <iyz>0.0</iyz>
+          <izz>0.1</izz>
+        </inertia>
+      </inertial>
+
+      <collision name="collision">
+        <geometry>
+          <mesh><uri>model://custom_humanoid_test_object/meshes/object.dae</uri></mesh>
+        </geometry>
+      </collision>
+
+      <visual name="visual">
+        <geometry>
+          <mesh><uri>model://custom_humanoid_test_object/meshes/object.dae</uri></mesh>
+        </geometry>
+        <material>
+          <script>Gazebo/Blue</script>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>
+```
+
+## Dynamic Environment Elements
+
+### Moving Obstacles
+
+For advanced testing, you can create moving obstacles:
+
+```xml
+<?xml version="1.0" ?>
+<sdf version="1.7">
+  <model name="moving_obstacle">
+    <link name="link">
+      <collision name="collision">
+        <geometry>
+          <box><size>0.5 0.5 1.0</size></box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <box><size>0.5 0.5 1.0</size></box>
+        </geometry>
+        <material>
+          <script>Gazebo/Red</script>
+        </material>
+      </visual>
+    </link>
+
+    <!-- Joint for movement -->
+    <joint name="slider_joint" type="prismatic">
+      <parent>world</parent>
+      <child>link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>-5</lower>
+          <upper>5</upper>
+        </limit>
+      </axis>
+    </joint>
+
+    <!-- Plugin to control movement -->
+    <plugin name="slider_controller" filename="libgazebo_ros_p3d.so">
+      <alwaysOn>true</alwaysOn>
+      <updateRate>100</updateRate>
+      <bodyName>link</bodyName>
+      <topicName>slider_pose</topicName>
+      <gaussianNoise>0.0</gaussianNoise>
+      <frameName>world</frameName>
+    </plugin>
+  </model>
+</sdf>
+```
+
+### Interactive Elements
+
+Create elements that respond to humanoid robot actions:
+
+```xml
+<gazebo>
+  <model name="interactive_door">
+    <link name="door_frame">
+      <static>true</static>
+      <collision name="collision">
+        <geometry>
+          <box><size>0.1 2.0 2.0</size></box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <box><size>0.1 2.0 2.0</size></box>
+        </geometry>
+        <material>
+          <script>Gazebo/Wood</script>
+        </material>
+      </visual>
+    </link>
+
+    <link name="door_panel">
+      <collision name="collision">
+        <geometry>
+          <box><size>0.05 1.8 0.8</size></box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <box><size>0.05 1.8 0.8</size></box>
+        </geometry>
+        <material>
+          <script>Gazebo/Wood</script>
+        </material>
+      </visual>
+    </link>
+
+    <joint name="door_hinge" type="revolute">
+      <parent>door_frame</parent>
+      <child>door_panel</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit>
+          <lower>-1.57</lower>
+          <upper>0</upper>
+        </limit>
+      </axis>
+    </joint>
+
+    <!-- Contact sensor to detect when door is opened -->
+    <plugin name="door_contact_sensor" filename="libgazebo_ros_bumper.so">
+      <alwaysOn>true</alwaysOn>
+      <updateRate>30.0</updateRate>
+      <bumperTopicName>door_contact</bumperTopicName>
+      <frameName>door_panel</frameName>
+    </plugin>
+  </model>
+</gazebo>
+```
+
+## ROS 2 Integration for Environment Control
+
+### Environment Control Node
+
+Create ROS 2 nodes to dynamically control environment elements:
+
+```python
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import Float64MultiArray
+from geometry_msgs.msg import Pose
+from gazebo_msgs.srv import SetEntityState
+from gazebo_msgs.msg import EntityState
+import random
+
+class EnvironmentController(Node):
+    def __init__(self):
+        super().__init__('environment_controller')
+
+        # Service client for moving objects
+        self.set_state_client = self.create_client(
+            SetEntityState, '/world/set_entity_state')
+
+        # Timer to periodically update environment
+        self.env_update_timer = self.create_timer(5.0, self.update_environment)
+
+        # Track moving objects
+        self.moving_objects = ['moving_obstacle', 'interactive_door']
+
+    def update_environment(self):
+        """Update environment elements"""
+        for obj_name in self.moving_objects:
+            if obj_name == 'moving_obstacle':
+                self.move_object_randomly(obj_name)
+            elif obj_name == 'interactive_door':
+                self.control_door(obj_name)
+
+    def move_object_randomly(self, object_name):
+        """Move object to random position"""
+        req = SetEntityState.Request()
+        req.state.name = object_name
+        req.state.pose.position.x = random.uniform(-3.0, 3.0)
+        req.state.pose.position.y = random.uniform(-3.0, 3.0)
+        req.state.pose.position.z = 0.5
+        req.state.reference_frame = 'world'
+
+        future = self.set_state_client.call_async(req)
+        future.add_done_callback(self.move_response_callback)
+
+    def control_door(self, door_name):
+        """Control door state"""
+        req = SetEntityState.Request()
+        req.state.name = door_name
+        # Toggle door state
+        req.state.pose.orientation.z = 0.0  # Closed
+        req.state.reference_frame = 'world'
+
+        future = self.set_state_client.call_async(req)
+        future.add_done_callback(self.door_response_callback)
+
+    def move_response_callback(self, future):
+        """Handle move response"""
+        try:
+            response = future.result()
+            if response.success:
+                self.get_logger().info('Object moved successfully')
+        except Exception as e:
+            self.get_logger().error(f'Failed to move object: {e}')
+
+    def door_response_callback(self, future):
+        """Handle door control response"""
+        try:
+            response = future.result()
+            if response.success:
+                self.get_logger().info('Door controlled successfully')
+        except Exception as e:
+            self.get_logger().error(f'Failed to control door: {e}')
+
+def main(args=None):
+    rclpy.init(args=args)
+    controller = EnvironmentController()
+
+    try:
+        rclpy.spin(controller)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        controller.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+## Specialized Testing Environments
+
+### Balance Testing Environment
+
+```xml
+<?xml version="1.0" ?>
+<sdf version="1.7">
+  <world name="balance_test_world">
+    <!-- Physics with high accuracy for balance testing -->
+    <physics name="balance_physics" type="ode">
+      <max_step_size>0.0005</max_step_size> <!-- Smaller steps for stability -->
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>2000</real_time_update_rate>
+      <ode>
+        <solver>
+          <type>quick</type>
+          <iters>100</iters> <!-- More iterations for stability -->
+          <sor>1.0</sor>
+        </solver>
+        <constraints>
+          <cfm>1e-6</cfm>
+          <erp>0.9</erp>
+        </constraints>
+      </ode>
+    </physics>
+
+    <!-- Ground plane with texture for visual feedback -->
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane><normal>0 0 1</normal></plane>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane><normal>0 0 1</normal></plane>
+          </geometry>
+          <material>
+            <script>Gazebo/White</script>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Balance beam for walking practice -->
+    <model name="balance_beam">
+      <static>true</static>
+      <link name="beam">
+        <collision name="collision">
+          <geometry>
+            <box><size>4 0.1 0.05</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>4 0.1 0.05</size></box>
+          </geometry>
+          <material>
+            <script>Gazebo/Wood</script>
+          </material>
+        </visual>
+      </link>
+      <pose>2 0 0.025 0 0 0</pose>
+    </model>
+
+    <!-- Stepping stones for balance challenge -->
+    <model name="step1">
+      <static>true</static>
+      <link name="stone">
+        <collision name="collision">
+          <geometry>
+            <cylinder><radius>0.15</radius><length>0.1</length></cylinder>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <cylinder><radius>0.15</radius><length>0.1</length></cylinder>
+          </geometry>
+          <material>
+            <script>Gazebo/Grey</script>
+          </material>
+        </visual>
+      </link>
+      <pose>0.5 0.3 0.05 0 0 0</pose>
+    </model>
+
+    <model name="step2">
+      <static>true</static>
+      <link name="stone">
+        <collision name="collision">
+          <geometry>
+            <cylinder><radius>0.15</radius><length>0.1</length></cylinder>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <cylinder><radius>0.15</radius><length>0.1</length></cylinder>
+          </geometry>
+          <material>
+            <script>Gazebo/Grey</script>
+          </material>
+        </visual>
+      </link>
+      <pose>0.8 -0.2 0.05 0 0 0</pose>
+    </model>
+
+    <!-- Inclined plane for balance testing -->
+    <model name="incline">
+      <static>true</static>
+      <link name="ramp">
+        <collision name="collision">
+          <geometry>
+            <box><size>2 1 0.5</size></box>
+          </geometry>
+          <pose>0 0 0.25 0 0.2 0</pose> <!-- 11.3 degrees incline -->
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>2 1 0.5</size></box>
+          </geometry>
+          <pose>0 0 0.25 0 0.2 0</pose>
+          <material>
+            <script>Gazebo/Grey</script>
+          </material>
+        </visual>
+      </link>
+      <pose>4 0 0 0 0 0</pose>
+    </model>
+  </world>
+</sdf>
+```
+
+### Navigation Testing Environment
+
+```xml
+<?xml version="1.0" ?>
+<sdf version="1.7">
+  <world name="navigation_test_world">
+    <!-- Standard physics -->
+    <physics name="default" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <!-- Maze-like structure -->
+    <model name="maze_walls">
+      <static>true</static>
+      <link name="walls">
+        <collision name="collision">
+          <geometry>
+            <box><size>10 0.1 1</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>10 0.1 1</size></box>
+          </geometry>
+          <material>
+            <script>Gazebo/Blue</script>
+          </material>
+        </visual>
+      </link>
+      <pose>0 -4.5 0.5 0 0 0</pose>
+    </model>
+
+    <!-- Doorways for navigation -->
+    <model name="doorway1">
+      <static>true</static>
+      <link name="left_wall">
+        <collision name="collision">
+          <geometry>
+            <box><size>2 0.1 1</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>2 0.1 1</size></box>
+          </geometry>
+          <material>
+            <script>Gazebo/Blue</script>
+          </material>
+        </visual>
+      </link>
+      <pose>-5 -2 0.5 0 0 0</pose>
+    </model>
+
+    <model name="doorway2">
+      <static>true</static>
+      <link name="right_wall">
+        <collision name="collision">
+          <geometry>
+            <box><size>2 0.1 1</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>2 0.1 1</size></box>
+          </geometry>
+          <material>
+            <script>Gazebo/Blue</script>
+          </material>
+        </visual>
+      </link>
+      <pose>5 -2 0.5 0 0 0</pose>
+    </model>
+
+    <!-- Moving obstacles for dynamic navigation -->
+    <model name="moving_obstacle_1">
+      <link name="obstacle">
+        <collision name="collision">
+          <geometry>
+            <sphere><radius>0.3</radius></sphere>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <sphere><radius>0.3</radius></sphere>
+          </geometry>
+          <material>
+            <script>Gazebo/Red</script>
+          </material>
+        </visual>
+        <inertial>
+          <mass>1.0</mass>
+          <inertia><ixx>0.045</ixx><iyy>0.045</iyy><izz>0.045</izz></inertia>
+        </inertial>
+      </link>
+      <pose>-3 0 0.3 0 0 0</pose>
+    </model>
+  </world>
+</sdf>
+```
+
+## Environment Validation and Testing
+
+### Automated Environment Testing
+
+```python
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+from geometry_msgs.msg import Pose
+from gazebo_msgs.srv import GetEntityState
+from sensor_msgs.msg import LaserScan
+import numpy as np
+
+class EnvironmentValidator(Node):
+    def __init__(self):
+        super().__init__('environment_validator')
+
+        # Service client to get entity states
+        self.get_state_client = self.create_client(
+            GetEntityState, '/world/get_entity_state')
+
+        # Subscribe to sensor data for environment validation
+        self.scan_sub = self.create_subscription(
+            LaserScan, '/scan', self.scan_callback, 10)
+
+        # Publisher for validation results
+        self.validation_pub = self.create_publisher(
+            String, '/environment_validation', 10)
+
+        # Timer for periodic validation
+        self.validation_timer = self.create_timer(10.0, self.validate_environment)
+
+        self.scan_data = None
+
+    def scan_callback(self, msg):
+        """Store laser scan data for validation"""
+        self.scan_data = msg
+
+    def validate_environment(self):
+        """Validate environment properties"""
+        validation_results = []
+
+        # Check if key objects are present
+        self.validate_object_presence('balance_beam', validation_results)
+        self.validate_object_presence('ground_plane', validation_results)
+
+        # Check environment properties from sensor data
+        if self.scan_data:
+            self.validate_navigation_space(validation_results)
+
+        # Publish validation results
+        result_msg = String()
+        result_msg.data = '; '.join(validation_results)
+        self.validation_pub.publish(result_msg)
+
+        self.get_logger().info(f'Environment validation: {result_msg.data}')
+
+    def validate_object_presence(self, object_name, results):
+        """Check if object exists in environment"""
+        req = GetEntityState.Request()
+        req.name = object_name
+        req.reference_frame = 'world'
+
+        future = self.get_state_client.call_async(req)
+        future.add_done_callback(
+            lambda future, obj_name=object_name, res=results:
+            self.object_presence_callback(future, obj_name, res))
+
+    def object_presence_callback(self, future, object_name, results):
+        """Handle object presence check response"""
+        try:
+            response = future.result()
+            if response.success:
+                results.append(f'{object_name}: OK')
+            else:
+                results.append(f'{object_name}: MISSING')
+        except Exception as e:
+            results.append(f'{object_name}: ERROR - {str(e)}')
+
+    def validate_navigation_space(self, results):
+        """Validate that navigation space is clear"""
+        if self.scan_data:
+            # Check for clear paths in multiple directions
+            ranges = np.array(self.scan_data.ranges)
+            valid_ranges = ranges[np.isfinite(ranges)]
+
+            if len(valid_ranges) > 0:
+                min_range = np.min(valid_ranges)
+                if min_range > 0.5:  # At least 50cm clearance
+                    results.append('Navigation space: CLEAR')
+                else:
+                    results.append('Navigation space: OBSTRUCTED')
+            else:
+                results.append('Navigation space: NO DATA')
+
+def main(args=None):
+    rclpy.init(args=args)
+    validator = EnvironmentValidator()
+
+    try:
+        rclpy.spin(validator)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        validator.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+## Best Practices for Environment Building
+
+### 1. Performance Optimization
+- Use simple collision geometry where possible
+- Optimize mesh complexity
+- Balance visual fidelity with performance
+- Use appropriate physics parameters
+
+### 2. Realism Considerations
+- Match real-world dimensions
+- Use realistic materials and textures
+- Implement appropriate lighting
+- Consider environmental physics
+
+### 3. Testing Coverage
+- Include various obstacle types
+- Test different scenarios
+- Validate sensor performance
+- Test edge cases
+
+## Summary
+
+Environment building is a critical aspect of humanoid robot simulation, providing the context in which robots operate and learn. Well-designed environments should balance realism with performance, provide diverse testing scenarios, and support the specific needs of humanoid robots.
+
+The key to successful environment building lies in understanding the requirements of your humanoid robot and creating environments that challenge its capabilities while providing safe and controlled testing conditions. From basic indoor scenes to complex outdoor environments, each scenario should be designed with specific testing objectives in mind.
+
+In the next chapter, we'll explore Unity integration for high-fidelity simulation, which provides photorealistic rendering capabilities for advanced humanoid robot simulation.

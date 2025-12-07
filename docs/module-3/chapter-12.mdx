@@ -1,0 +1,1189 @@
+---
+sidebar_position: 12
+title: 'Chapter 12: Photorealistic Simulation & Synthetic Data'
+---
+
+# Photorealistic Simulation & Synthetic Data
+
+## Overview
+
+Photorealistic simulation and synthetic data generation are transformative technologies in robotics, particularly for humanoid robots that require extensive training on diverse visual data. NVIDIA Isaac's advanced rendering capabilities enable the creation of synthetic datasets that can rival or exceed real-world data quality, significantly accelerating AI model development while reducing real-world data collection costs.
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+- Understand photorealistic rendering principles in robotics simulation
+- Generate synthetic datasets using Isaac's tools
+- Apply domain randomization techniques
+- Create labeled training data for computer vision models
+- Evaluate synthetic vs. real data quality
+- Integrate synthetic data into AI training pipelines
+
+## Photorealistic Rendering in Robotics
+
+### Why Photorealistic Simulation Matters
+
+Photorealistic simulation is crucial for humanoid robots because:
+
+1. **Visual Perception**: Humanoid robots rely heavily on visual data for navigation and interaction
+2. **Training Efficiency**: Synthetic data can be generated rapidly with perfect labels
+3. **Edge Case Coverage**: Simulation can generate rare or dangerous scenarios safely
+4. **Cost Reduction**: Eliminates need for extensive real-world data collection
+5. **Consistency**: Controlled environments ensure reproducible results
+
+### Rendering Pipeline Components
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   3D Scene      │    │   Lighting      │    │   Materials     │
+│   Description   │───▶│   Simulation    │───▶│   & Textures    │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Physically-Based Rendering                   │
+│         (Global Illumination, Shadows, Reflections)            │
+└─────────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Sensor        │    │   Post-         │    │   Output        │
+│   Simulation    │───▶│   Processing    │───▶│   Formats       │
+│   (Cameras,     │    │   (Noise,      │    │   (RGB, Depth,  │
+│   LIDAR, etc.)  │    │   Distortion)   │    │   Semantic)     │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+### Physically-Based Rendering (PBR)
+
+PBR ensures that materials and lighting behave realistically:
+
+```python
+# Example PBR material setup in Isaac Sim
+import omni
+from pxr import Gf, Sdf, UsdShade
+from omni.isaac.core.utils.prims import create_prim
+from omni.isaac.core.utils.materials import create_preview_surface
+
+def setup_pbr_material(prim_path, albedo_color, roughness=0.5, metallic=0.0):
+    """Create physically-based material with realistic properties"""
+
+    # Create material prim
+    material_path = f"{prim_path}/material"
+    create_prim(
+        prim_path=material_path,
+        prim_type="Material"
+    )
+
+    # Create PBR surface shader
+    shader_path = f"{material_path}/Shader"
+    shader = create_preview_surface(
+        prim_path=shader_path,
+        color=albedo_color,
+        roughness=roughness,
+        metallic=metallic
+    )
+
+    return shader
+
+def apply_realistic_materials(robot_prim_path):
+    """Apply realistic materials to robot parts"""
+
+    # Head material (metallic surface)
+    head_material = setup_pbr_material(
+        f"{robot_prim_path}/head",
+        albedo_color=(0.7, 0.7, 0.8),  # Light gray metallic
+        roughness=0.2,
+        metallic=0.8
+    )
+
+    # Torso material (matte plastic)
+    torso_material = setup_pbr_material(
+        f"{robot_prim_path}/torso",
+        albedo_color=(0.3, 0.3, 0.8),  # Blue plastic
+        roughness=0.7,
+        metallic=0.0
+    )
+
+    # Hand material (rubber-like)
+    hand_material = setup_pbr_material(
+        f"{robot_prim_path}/hand",
+        albedo_color=(0.2, 0.2, 0.2),  # Black rubber
+        roughness=0.9,
+        metallic=0.1
+    )
+```
+
+## Isaac Perception Package
+
+### Overview of Isaac Perception
+
+The Isaac Perception package provides tools for synthetic data generation:
+
+- **Synthetic Data Generation**: Create labeled datasets with perfect annotations
+- **Domain Randomization**: Randomize environments to improve model robustness
+- **Sensor Simulation**: Accurate simulation of cameras, LIDAR, and other sensors
+- **Annotation Tools**: Automatic generation of ground truth labels
+
+### Setting Up Synthetic Data Generation
+
+```python
+import omni
+from omni.isaac.core import World
+from omni.isaac.synthetic_utils import SyntheticDataHelper
+from omni.synthetic_utils.scripts import Annotators
+import numpy as np
+
+class SyntheticDataGenerator:
+    def __init__(self):
+        self.world = World(stage_units_in_meters=1.0)
+        self.setup_scene()
+        self.setup_synthetic_data_pipeline()
+
+    def setup_scene(self):
+        """Set up the simulation scene"""
+        # Add ground plane
+        self.world.scene.add_default_ground_plane()
+
+        # Add lighting
+        self.setup_lighting()
+
+        # Add objects for data generation
+        self.add_random_objects()
+
+    def setup_lighting(self):
+        """Set up realistic lighting conditions"""
+        # Create dome light for even illumination
+        dome_light = omni.kit.commands.execute(
+            "CreateDomeLightCommand",
+            position=(0, 0, 10),
+            name="dome_light"
+        )
+
+        # Add directional light for shadows
+        sun_light = omni.kit.commands.execute(
+            "CreateDistantLightCommand",
+            position=(10, 10, 10),
+            direction=(-1, -1, -1),
+            name="sun_light"
+        )
+
+    def add_random_objects(self):
+        """Add random objects for diverse training data"""
+        object_types = [
+            "cube", "sphere", "cylinder", "cone", "torus"
+        ]
+
+        for i in range(20):  # Add 20 random objects
+            obj_type = np.random.choice(object_types)
+            position = (
+                np.random.uniform(-5, 5),
+                np.random.uniform(-5, 5),
+                np.random.uniform(0.5, 2.0)
+            )
+
+            # Add object to scene based on type
+            self.add_object(obj_type, position, i)
+
+    def setup_synthetic_data_pipeline(self):
+        """Set up the synthetic data generation pipeline"""
+        # Initialize synthetic data helper
+        self.sd_helper = SyntheticDataHelper()
+
+        # Enable required annotators
+        self.enable_annotators()
+
+    def enable_annotators(self):
+        """Enable various annotation types"""
+        # RGB camera data
+        Annotators.ENABLED_ANNOTATORS.add("rgb")
+
+        # Depth data
+        Annotators.ENABLED_ANNOTATORS.add("depth")
+
+        # Semantic segmentation
+        Annotators.ENABLED_ANNOTATORS.add("semantic_segmentation")
+
+        # Instance segmentation
+        Annotators.ENABLED_ANNOTATORS.add("instance_segmentation")
+
+        # Bounding boxes
+        Annotators.ENABLED_ANNOTATORS.add("bounding_box_2d_tight")
+
+        # Object poses
+        Annotators.ENABLED_ANNOTATORS.add("pose")
+
+    def generate_dataset(self, num_samples=1000):
+        """Generate synthetic dataset"""
+        dataset = {
+            'rgb': [],
+            'depth': [],
+            'semantic': [],
+            'instances': [],
+            'boxes': [],
+            'poses': []
+        }
+
+        for i in range(num_samples):
+            # Randomize scene
+            self.randomize_scene()
+
+            # Step simulation
+            self.world.step(render=True)
+
+            # Capture synthetic data
+            sample = self.capture_synthetic_data()
+            for key, value in sample.items():
+                dataset[key].append(value)
+
+            print(f"Generated sample {i+1}/{num_samples}")
+
+        return dataset
+
+    def randomize_scene(self):
+        """Apply domain randomization to scene"""
+        # Randomize lighting
+        self.randomize_lighting()
+
+        # Randomize object positions
+        self.randomize_object_positions()
+
+        # Randomize materials
+        self.randomize_materials()
+
+        # Randomize camera parameters
+        self.randomize_camera()
+
+    def randomize_lighting(self):
+        """Randomize lighting conditions"""
+        # Randomize dome light intensity
+        dome_intensity = np.random.uniform(0.5, 2.0)
+
+        # Randomize sun light direction
+        sun_direction = (
+            np.random.uniform(-1, 1),
+            np.random.uniform(-1, 1),
+            np.random.uniform(-1, 0)
+        )
+
+    def randomize_object_positions(self):
+        """Randomize object positions"""
+        # Move objects to new positions
+        pass
+
+    def randomize_materials(self):
+        """Randomize material properties"""
+        # Randomize colors, textures, and surface properties
+        pass
+
+    def randomize_camera(self):
+        """Randomize camera parameters"""
+        # Randomize camera position, orientation, and intrinsics
+        pass
+
+    def capture_synthetic_data(self):
+        """Capture all synthetic data for current frame"""
+        # This would interface with Isaac's annotators
+        # to capture RGB, depth, semantic, etc.
+        sample = {
+            'rgb': np.random.rand(480, 640, 3),  # Placeholder
+            'depth': np.random.rand(480, 640),   # Placeholder
+            'semantic': np.random.randint(0, 10, (480, 640)),  # Placeholder
+            'instances': np.random.randint(0, 20, (480, 640)), # Placeholder
+            'boxes': [],  # Placeholder
+            'poses': {}   # Placeholder
+        }
+        return sample
+```
+
+## Domain Randomization Techniques
+
+### Principles of Domain Randomization
+
+Domain randomization helps bridge the sim-to-real gap by training models on diverse synthetic data:
+
+```python
+import numpy as np
+import random
+
+class DomainRandomization:
+    def __init__(self):
+        self.randomization_params = self.setup_randomization_params()
+
+    def setup_randomization_params(self):
+        """Define randomization parameter ranges"""
+        return {
+            'lighting': {
+                'intensity_range': (0.3, 2.0),
+                'color_temperature_range': (3000, 8000),  # Kelvin
+                'direction_variance': 0.5
+            },
+            'materials': {
+                'albedo_range': (0.1, 1.0),
+                'roughness_range': (0.0, 1.0),
+                'metallic_range': (0.0, 1.0),
+                'specular_range': (0.0, 1.0)
+            },
+            'textures': {
+                'scale_range': (0.1, 5.0),
+                'rotation_range': (0, 360),
+                'distortion_range': (0.0, 0.1)
+            },
+            'camera': {
+                'fov_range': (30, 90),  # degrees
+                'position_variance': 0.1,
+                'orientation_variance': 0.1
+            },
+            'backgrounds': {
+                'complexity_range': (0, 10),  # Number of background objects
+                'clutter_range': (0, 20),     # Number of clutter objects
+                'pattern_range': (0, 5)       # Different background patterns
+            }
+        }
+
+    def randomize_lighting(self):
+        """Apply random lighting conditions"""
+        params = self.randomization_params['lighting']
+
+        # Random intensity
+        intensity = np.random.uniform(*params['intensity_range'])
+
+        # Random color temperature (converted to RGB)
+        color_temp = np.random.uniform(*params['color_temperature_range'])
+        color_rgb = self.color_temperature_to_rgb(color_temp)
+
+        # Random direction variance
+        direction_variance = params['direction_variance']
+
+        return {
+            'intensity': intensity,
+            'color': color_rgb,
+            'direction_variance': direction_variance
+        }
+
+    def randomize_materials(self):
+        """Apply random material properties"""
+        params = self.randomization_params['materials']
+
+        material_properties = {
+            'albedo': np.random.uniform(*params['albedo_range'], 3),
+            'roughness': np.random.uniform(*params['roughness_range']),
+            'metallic': np.random.uniform(*params['metallic_range']),
+            'specular': np.random.uniform(*params['specular_range'])
+        }
+
+        return material_properties
+
+    def randomize_camera(self):
+        """Apply random camera parameters"""
+        params = self.randomization_params['camera']
+
+        camera_params = {
+            'fov': np.random.uniform(*params['fov_range']),
+            'position_variance': np.random.uniform(-params['position_variance'],
+                                                 params['position_variance'], 3),
+            'orientation_variance': np.random.uniform(-params['orientation_variance'],
+                                                     params['orientation_variance'], 3)
+        }
+
+        return camera_params
+
+    def color_temperature_to_rgb(self, color_temp):
+        """Convert color temperature to RGB (simplified)"""
+        # This is a simplified conversion - real implementation would be more complex
+        temp = color_temp / 100
+        if temp <= 66:
+            red = 255
+            green = temp
+            green = 99.4708025861 * np.log(green) - 161.1195681661
+        else:
+            red = temp - 60
+            red = 329.698727446 * (red ** -0.1332047592)
+            green = temp - 60
+            green = 288.1221695283 * (green ** -0.0755148492)
+
+        blue = 255 if temp >= 66 else temp - 10
+        blue = 0 if temp < 19 else 138.5177312231 * np.log(blue) - 305.0447927307
+
+        # Clamp values to [0, 255]
+        red = np.clip(red, 0, 255) / 255.0
+        green = np.clip(green, 0, 255) / 255.0
+        blue = np.clip(blue, 0, 255) / 255.0
+
+        return (red, green, blue)
+
+    def apply_randomization(self, scene_object):
+        """Apply domain randomization to a scene object"""
+        # Randomize material
+        material_params = self.randomize_materials()
+        self.apply_material_properties(scene_object, material_params)
+
+        # Randomize position and orientation
+        self.randomize_object_pose(scene_object)
+
+        # Add texture variations
+        self.add_texture_variations(scene_object)
+
+    def apply_material_properties(self, obj, material_params):
+        """Apply material properties to object"""
+        # This would interface with the rendering engine
+        # to apply the randomized material properties
+        pass
+
+    def randomize_object_pose(self, obj):
+        """Randomize object position and orientation"""
+        # Apply random translation
+        translation = np.random.uniform(-0.5, 0.5, 3)
+
+        # Apply random rotation
+        rotation = np.random.uniform(-15, 15, 3)  # degrees
+
+        # Apply transformations to object
+        pass
+
+    def add_texture_variations(self, obj):
+        """Add texture variations to object"""
+        # Apply random texture scaling, rotation, etc.
+        pass
+```
+
+## Synthetic Data Formats and Labels
+
+### Data Format Standards
+
+Synthetic data should follow standard formats for compatibility:
+
+```python
+import json
+import numpy as np
+import cv2
+from dataclasses import dataclass
+from typing import List, Dict, Any
+
+@dataclass
+class BoundingBox:
+    """Bounding box annotation"""
+    x_min: float
+    y_min: float
+    x_max: float
+    y_max: float
+    class_id: int
+    class_name: str
+    confidence: float = 1.0
+
+@dataclass
+class InstanceMask:
+    """Instance segmentation mask"""
+    mask: np.ndarray  # Binary mask
+    class_id: int
+    instance_id: int
+    bbox: BoundingBox
+
+@dataclass
+class CameraIntrinsics:
+    """Camera intrinsic parameters"""
+    fx: float  # Focal length x
+    fy: float  # Focal length y
+    cx: float  # Principal point x
+    cy: float  # Principal point y
+    width: int
+    height: int
+    distortion_coeffs: List[float]
+
+class SyntheticDataFormatter:
+    def __init__(self):
+        self.label_map = self.create_label_map()
+
+    def create_label_map(self):
+        """Create mapping from class IDs to names"""
+        return {
+            0: 'background',
+            1: 'humanoid_robot',
+            2: 'table',
+            3: 'chair',
+            4: 'obstacle',
+            5: 'target_object',
+            # Add more classes as needed
+        }
+
+    def format_for_coco(self, sample_data):
+        """Format synthetic data in COCO format"""
+        coco_format = {
+            "info": {
+                "year": 2024,
+                "version": "1.0",
+                "description": "Synthetic Humanoid Robot Dataset",
+                "contributor": "Isaac Synthetic Data Generator",
+                "url": "",
+                "date_created": "2024-01-01"
+            },
+            "licenses": [
+                {
+                    "id": 1,
+                    "name": "Synthetic Data License",
+                    "url": ""
+                }
+            ],
+            "images": [],
+            "annotations": [],
+            "categories": []
+        }
+
+        # Add categories
+        for class_id, class_name in self.label_map.items():
+            if class_id > 0:  # Skip background
+                coco_format["categories"].append({
+                    "id": class_id,
+                    "name": class_name,
+                    "supercategory": "object"
+                })
+
+        # Add image and annotations
+        image_info = {
+            "id": 1,
+            "width": sample_data['rgb'].shape[1],
+            "height": sample_data['rgb'].shape[0],
+            "file_name": "synthetic_000001.png",
+            "license": 1,
+            "flickr_url": "",
+            "coco_url": "",
+            "date_captured": "2024-01-01 00:00:00"
+        }
+        coco_format["images"].append(image_info)
+
+        # Add annotations
+        for i, bbox in enumerate(sample_data['bboxes']):
+            annotation = {
+                "id": i + 1,
+                "image_id": 1,
+                "category_id": bbox.class_id,
+                "bbox": [
+                    bbox.x_min,
+                    bbox.y_min,
+                    bbox.x_max - bbox.x_min,
+                    bbox.y_max - bbox.y_min
+                ],
+                "area": (bbox.x_max - bbox.x_min) * (bbox.y_max - bbox.y_min),
+                "iscrowd": 0
+            }
+            coco_format["annotations"].append(annotation)
+
+        return coco_format
+
+    def format_for_yolo(self, sample_data, output_dir):
+        """Format synthetic data in YOLO format"""
+        # Create label file
+        label_file = f"{output_dir}/labels/synthetic_000001.txt"
+
+        with open(label_file, 'w') as f:
+            for bbox in sample_data['bboxes']:
+                # YOLO format: class_id center_x center_y width height (normalized)
+                img_width = sample_data['rgb'].shape[1]
+                img_height = sample_data['rgb'].shape[0]
+
+                center_x = (bbox.x_min + bbox.x_max) / 2.0 / img_width
+                center_y = (bbox.y_min + bbox.y_max) / 2.0 / img_height
+                width = (bbox.x_max - bbox.x_min) / img_width
+                height = (bbox.y_max - bbox.y_min) / img_height
+
+                f.write(f"{bbox.class_id} {center_x} {center_y} {width} {height}\n")
+
+    def format_for_depth_estimation(self, sample_data, output_dir):
+        """Format depth data for depth estimation training"""
+        # Save depth map
+        depth_path = f"{output_dir}/depth/synthetic_000001_depth.png"
+        # Normalize depth to 16-bit for PNG storage
+        normalized_depth = (sample_data['depth'] / np.max(sample_data['depth']) * 65535).astype(np.uint16)
+        cv2.imwrite(depth_path, normalized_depth)
+
+        # Save corresponding RGB image
+        rgb_path = f"{output_dir}/rgb/synthetic_000001_rgb.png"
+        cv2.imwrite(rgb_path, cv2.cvtColor(sample_data['rgb'], cv2.COLOR_RGB2BGR))
+
+    def format_for_pose_estimation(self, sample_data, output_dir):
+        """Format data for 6D pose estimation"""
+        pose_file = f"{output_dir}/poses/synthetic_000001_pose.json"
+
+        pose_data = {
+            "object_poses": [],
+            "camera_intrinsics": sample_data.get('camera_intrinsics', None)
+        }
+
+        for obj_id, pose in sample_data['poses'].items():
+            pose_data["object_poses"].append({
+                "object_id": obj_id,
+                "rotation_matrix": pose['rotation'].tolist(),
+                "translation_vector": pose['translation'].tolist(),
+                "bounding_box": pose.get('bbox', None)
+            })
+
+        with open(pose_file, 'w') as f:
+            json.dump(pose_data, f, indent=2)
+```
+
+## Advanced Sensor Simulation
+
+### Camera Simulation with Realistic Effects
+
+```python
+import numpy as np
+import cv2
+from scipy import ndimage
+
+class RealisticCameraSimulator:
+    def __init__(self, width=640, height=480, fov=60):
+        self.width = width
+        self.height = height
+        self.fov = fov
+        self.intrinsics = self.compute_intrinsics()
+
+    def compute_intrinsics(self):
+        """Compute camera intrinsic matrix"""
+        f = 0.5 * self.width / np.tan(0.5 * np.radians(self.fov))
+        cx = self.width / 2
+        cy = self.height / 2
+
+        return np.array([
+            [f, 0, cx],
+            [0, f, cy],
+            [0, 0, 1]
+        ])
+
+    def add_lens_distortion(self, image):
+        """Add realistic lens distortion"""
+        # Distortion coefficients (typical values for wide-angle lens)
+        k1, k2, p1, p2, k3 = -0.1, 0.05, 0.001, 0.001, -0.01
+
+        # Get image dimensions
+        h, w = image.shape[:2]
+
+        # Create coordinate grid
+        x = np.linspace(-1, 1, w)
+        y = np.linspace(-1, 1, h)
+        x_grid, y_grid = np.meshgrid(x, y)
+
+        # Apply radial distortion
+        r_squared = x_grid**2 + y_grid**2
+        radial_distortion = 1 + k1*r_squared + k2*r_squared**2 + k3*r_squared**3
+
+        # Apply tangential distortion
+        x_distorted = x_grid * radial_distortion + 2*p1*x_grid*y_grid + p2*(r_squared + 2*x_grid**2)
+        y_distorted = y_grid * radial_distortion + p1*(r_squared + 2*y_grid**2) + 2*p2*x_grid*y_grid
+
+        # Normalize back to pixel coordinates
+        x_pixels = ((x_distorted + 1) * 0.5 * (w - 1)).astype(np.float32)
+        y_pixels = ((y_distorted + 1) * 0.5 * (h - 1)).astype(np.float32)
+
+        # Remap image
+        map_x = np.clip(x_pixels, 0, w-1).astype(np.float32)
+        map_y = np.clip(y_pixels, 0, h-1).astype(np.float32)
+
+        distorted_image = cv2.remap(image, map_x, map_y, interpolation=cv2.INTER_LINEAR)
+
+        return distorted_image
+
+    def add_sensor_noise(self, image, iso=100):
+        """Add realistic sensor noise"""
+        # Convert to float in [0, 1]
+        img_float = image.astype(np.float32) / 255.0
+
+        # Shot noise (photon noise) - proportional to signal
+        shot_noise_std = np.sqrt(img_float * iso / 100 * 0.01)
+        shot_noise = np.random.normal(0, shot_noise_std, img_float.shape)
+
+        # Read noise (constant) - independent of signal
+        read_noise_std = 0.005 * (iso / 100)
+        read_noise = np.random.normal(0, read_noise_std, img_float.shape)
+
+        # Combine noises
+        total_noise = shot_noise + read_noise
+
+        # Add noise to image
+        noisy_img = np.clip(img_float + total_noise, 0, 1)
+
+        # Convert back to uint8
+        return (noisy_img * 255).astype(np.uint8)
+
+    def add_motion_blur(self, image, motion_vector=(0.1, 0.05)):
+        """Add motion blur based on camera/object motion"""
+        # Create motion blur kernel
+        size = max(5, int(np.sqrt(motion_vector[0]**2 + motion_vector[1]**2) * 50))
+        if size < 3:
+            return image
+
+        kernel = np.zeros((size, size))
+        kernel[size//2, :] = 1.0 / size  # Horizontal motion blur
+
+        # Apply motion blur
+        blurred = cv2.filter2D(image, -1, kernel)
+        return blurred
+
+    def simulate_camera_effects(self, rgb_image):
+        """Apply all camera effects to RGB image"""
+        # Add lens distortion
+        distorted = self.add_lens_distortion(rgb_image)
+
+        # Add sensor noise
+        noisy = self.add_sensor_noise(distorted)
+
+        # Add motion blur (if applicable)
+        motion_blurred = self.add_motion_blur(noisy)
+
+        return motion_blurred
+```
+
+## Quality Assessment and Validation
+
+### Evaluating Synthetic Data Quality
+
+```python
+import numpy as np
+from scipy import stats
+import matplotlib.pyplot as plt
+
+class SyntheticDataQualityAssessment:
+    def __init__(self):
+        self.metrics = {}
+
+    def assess_visual_quality(self, synthetic_img, real_img):
+        """Assess visual quality of synthetic vs real images"""
+        # Calculate various image quality metrics
+
+        # Structural Similarity Index (SSIM) - conceptual implementation
+        ssim_score = self.calculate_ssim(synthetic_img, real_img)
+
+        # Peak Signal-to-Noise Ratio (PSNR)
+        psnr_score = self.calculate_psnr(synthetic_img, real_img)
+
+        # Naturalness Image Quality Evaluator (NIQE) - simplified
+        niqe_score = self.estimate_niqe(synthetic_img)
+
+        self.metrics['visual_quality'] = {
+            'ssim': ssim_score,
+            'psnr': psnr_score,
+            'niqe': niqe_score
+        }
+
+        return self.metrics['visual_quality']
+
+    def calculate_ssim(self, img1, img2):
+        """Calculate Structural Similarity Index"""
+        # Simplified SSIM calculation
+        # In practice, use scikit-image or similar
+        mean1 = np.mean(img1.astype(float))
+        mean2 = np.mean(img2.astype(float))
+
+        std1 = np.std(img1.astype(float))
+        std2 = np.std(img2.astype(float))
+
+        covariance = np.mean((img1.astype(float) - mean1) * (img2.astype(float) - mean2))
+
+        c1 = (0.01 * 255) ** 2
+        c2 = (0.03 * 255) ** 2
+
+        ssim = ((2 * mean1 * mean2 + c1) * (2 * covariance + c2)) / \
+               ((mean1**2 + mean2**2 + c1) * (std1**2 + std2**2 + c2))
+
+        return ssim
+
+    def calculate_psnr(self, img1, img2):
+        """Calculate Peak Signal-to-Noise Ratio"""
+        mse = np.mean((img1.astype(float) - img2.astype(float)) ** 2)
+        if mse == 0:
+            return float('inf')
+
+        max_pixel = 255.0
+        psnr = 20 * np.log10(max_pixel / np.sqrt(mse))
+        return psnr
+
+    def estimate_niqe(self, img):
+        """Estimate Naturalness Image Quality Evaluator score"""
+        # Simplified NIQE estimation
+        # Real implementation would use more sophisticated features
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if len(img.shape) == 3 else img
+
+        # Calculate gradient magnitude as a proxy for naturalness
+        grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+        gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+
+        # A more natural image would have gradient distribution
+        # closer to natural image statistics
+        grad_hist, _ = np.histogram(gradient_magnitude.ravel(), bins=256)
+        grad_hist = grad_hist / np.sum(grad_hist)  # Normalize
+
+        # Simplified score (lower is better for NIQE)
+        niqe_score = np.std(gradient_magnitude)
+        return niqe_score
+
+    def assess_label_quality(self, synthetic_labels, real_labels):
+        """Assess quality of synthetic labels vs real labels"""
+        # Compare label distributions
+        synthetic_hist = self.compute_label_histogram(synthetic_labels)
+        real_hist = self.compute_label_histogram(real_labels)
+
+        # Calculate histogram intersection
+        intersection = np.sum(np.minimum(synthetic_hist, real_hist))
+        union = np.sum(np.maximum(synthetic_hist, real_hist))
+
+        label_quality = intersection / union if union > 0 else 0
+
+        self.metrics['label_quality'] = {
+            'distribution_similarity': label_quality,
+            'synthetic_histogram': synthetic_hist,
+            'real_histogram': real_hist
+        }
+
+        return self.metrics['label_quality']
+
+    def compute_label_histogram(self, labels):
+        """Compute histogram of label classes"""
+        if isinstance(labels, (list, np.ndarray)):
+            unique, counts = np.unique(labels, return_counts=True)
+            histogram = np.zeros(int(np.max(unique)) + 1)
+            histogram[unique.astype(int)] = counts
+        else:
+            # Assume it's already a histogram
+            histogram = labels
+
+        return histogram
+
+    def assess_diversity(self, synthetic_dataset):
+        """Assess diversity of synthetic dataset"""
+        # Calculate diversity metrics
+        feature_vectors = self.extract_features(synthetic_dataset)
+
+        # Calculate pairwise distances
+        distances = self.calculate_pairwise_distances(feature_vectors)
+
+        # Diversity is related to average distance between samples
+        diversity_score = np.mean(distances)
+
+        self.metrics['diversity'] = {
+            'average_pairwise_distance': diversity_score,
+            'num_samples': len(synthetic_dataset),
+            'feature_space_coverage': self.estimate_coverage(feature_vectors)
+        }
+
+        return self.metrics['diversity']
+
+    def extract_features(self, dataset):
+        """Extract features for diversity assessment"""
+        # This would extract meaningful features from the dataset
+        # For images, this could be CNN features, color histograms, etc.
+        features = []
+
+        for sample in dataset:
+            # Extract simple features (in practice, use more sophisticated features)
+            rgb_mean = np.mean(sample['rgb'], axis=(0,1))
+            rgb_std = np.std(sample['rgb'], axis=(0,1))
+            texture_features = self.extract_texture_features(sample['rgb'])
+
+            feature_vector = np.concatenate([rgb_mean, rgb_std, texture_features])
+            features.append(feature_vector)
+
+        return np.array(features)
+
+    def extract_texture_features(self, image):
+        """Extract simple texture features"""
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY) if len(image.shape) == 3 else image
+
+        # Use local binary patterns or other texture descriptors
+        # Simplified version using gradient statistics
+        grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+
+        texture_features = [
+            np.mean(np.abs(grad_x)),
+            np.mean(np.abs(grad_y)),
+            np.std(grad_x),
+            np.std(grad_y)
+        ]
+
+        return np.array(texture_features)
+
+    def calculate_pairwise_distances(self, features):
+        """Calculate pairwise distances between feature vectors"""
+        n_samples = len(features)
+        distances = np.zeros((n_samples, n_samples))
+
+        for i in range(n_samples):
+            for j in range(i+1, n_samples):
+                dist = np.linalg.norm(features[i] - features[j])
+                distances[i, j] = dist
+                distances[j, i] = dist  # Symmetric matrix
+
+        return distances[np.triu_indices_from(distances, k=1)]
+
+    def estimate_coverage(self, features):
+        """Estimate feature space coverage"""
+        # Calculate volume of feature space covered
+        feature_ranges = np.max(features, axis=0) - np.min(features, axis=0)
+        coverage = np.prod(feature_ranges)  # Simplified coverage metric
+
+        return coverage
+
+    def generate_quality_report(self):
+        """Generate comprehensive quality assessment report"""
+        report = {
+            'overall_quality_score': self.compute_overall_score(),
+            'detailed_metrics': self.metrics,
+            'recommendations': self.generate_recommendations()
+        }
+
+        return report
+
+    def compute_overall_score(self):
+        """Compute overall quality score"""
+        if not self.metrics:
+            return 0.0
+
+        scores = []
+        if 'visual_quality' in self.metrics:
+            # Normalize and weight visual quality metrics
+            ssim = self.metrics['visual_quality']['ssim']
+            psnr = self.metrics['visual_quality']['psnr'] / 50  # Normalize PSNR
+            scores.append((ssim + min(psnr, 1.0)) / 2)
+
+        if 'label_quality' in self.metrics:
+            scores.append(self.metrics['label_quality']['distribution_similarity'])
+
+        if 'diversity' in self.metrics:
+            # Normalize diversity score
+            diversity = min(self.metrics['diversity']['average_pairwise_distance'] / 100, 1.0)
+            scores.append(diversity)
+
+        return np.mean(scores) if scores else 0.0
+
+    def generate_recommendations(self):
+        """Generate recommendations based on quality assessment"""
+        recommendations = []
+
+        if 'visual_quality' in self.metrics:
+            if self.metrics['visual_quality']['ssim'] < 0.5:
+                recommendations.append("Consider improving visual realism through better materials and lighting")
+            if self.metrics['visual_quality']['psnr'] < 30:
+                recommendations.append("Reduce noise artifacts in synthetic images")
+
+        if 'label_quality' in self.metrics:
+            if self.metrics['label_quality']['distribution_similarity'] < 0.7:
+                recommendations.append("Adjust synthetic data generation to better match real data distribution")
+
+        if 'diversity' in self.metrics:
+            if self.metrics['diversity']['feature_space_coverage'] < 0.3:
+                recommendations.append("Increase domain randomization to improve dataset diversity")
+
+        return recommendations
+```
+
+## Integration with AI Training Pipelines
+
+### Synthetic Data Training Pipeline
+
+```python
+import torch
+import torch.nn as nn
+import torchvision.transforms as transforms
+from torch.utils.data import Dataset, DataLoader
+import os
+import json
+from PIL import Image
+
+class SyntheticRoboticsDataset(Dataset):
+    def __init__(self, data_dir, transform=None, task='classification'):
+        self.data_dir = data_dir
+        self.transform = transform
+        self.task = task
+
+        # Load annotations
+        self.annotations = self.load_annotations()
+
+    def load_annotations(self):
+        """Load annotations from synthetic dataset"""
+        annotations_file = os.path.join(self.data_dir, 'annotations.json')
+
+        with open(annotations_file, 'r') as f:
+            annotations = json.load(f)
+
+        return annotations
+
+    def __len__(self):
+        return len(self.annotations['images'])
+
+    def __getitem__(self, idx):
+        # Get image and annotation
+        img_info = self.annotations['images'][idx]
+        img_path = os.path.join(self.data_dir, 'images', img_info['file_name'])
+
+        # Load image
+        image = Image.open(img_path).convert('RGB')
+
+        # Apply transforms
+        if self.transform:
+            image = self.transform(image)
+
+        # Get annotation
+        if self.task == 'classification':
+            label = self.get_classification_label(idx)
+            return image, label
+        elif self.task == 'detection':
+            target = self.get_detection_target(idx)
+            return image, target
+        else:
+            raise ValueError(f"Unsupported task: {self.task}")
+
+    def get_classification_label(self, idx):
+        """Get classification label for the image"""
+        # Find annotations for this image
+        img_id = self.annotations['images'][idx]['id']
+
+        # In classification, we might have a single class per image
+        # or multiple classes for multi-label classification
+        return 0  # Placeholder
+
+    def get_detection_target(self, idx):
+        """Get detection target for the image"""
+        # Find annotations for this image
+        img_id = self.annotations['images'][idx]['id']
+
+        # Get all annotations for this image
+        img_annotations = [ann for ann in self.annotations['annotations']
+                          if ann['image_id'] == img_id]
+
+        # Format for detection training
+        boxes = []
+        labels = []
+
+        for ann in img_annotations:
+            bbox = ann['bbox']  # [x_min, y_min, width, height]
+            boxes.append([bbox[0], bbox[1], bbox[0] + bbox[2], bbox[1] + bbox[3]])  # Convert to [x1, y1, x2, y2]
+            labels.append(ann['category_id'])
+
+        target = {
+            'boxes': torch.tensor(boxes, dtype=torch.float32),
+            'labels': torch.tensor(labels, dtype=torch.int64)
+        }
+
+        return target
+
+def create_training_pipeline():
+    """Create training pipeline with synthetic data"""
+
+    # Define data transforms
+    train_transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+
+    # Create dataset
+    dataset = SyntheticRoboticsDataset(
+        data_dir='/path/to/synthetic/dataset',
+        transform=train_transform,
+        task='classification'
+    )
+
+    # Create data loader
+    dataloader = DataLoader(
+        dataset,
+        batch_size=32,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True
+    )
+
+    # Example model
+    model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=False)
+    model.fc = nn.Linear(model.fc.in_features, num_classes=10)  # Adjust for your classes
+
+    # Training setup
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+    # Training loop
+    model.train()
+    for epoch in range(10):
+        for batch_idx, (data, target) in enumerate(dataloader):
+            data, target = data.to(device), target.to(device)
+
+            optimizer.zero_grad()
+            output = model(data)
+            loss = criterion(output, target)
+            loss.backward()
+            optimizer.step()
+
+            if batch_idx % 100 == 0:
+                print(f'Epoch: {epoch}, Batch: {batch_idx}, Loss: {loss.item():.6f}')
+
+    return model
+
+# Example usage
+if __name__ == "__main__":
+    # This would be used to train a model on synthetic data
+    pass
+```
+
+## Best Practices for Synthetic Data Generation
+
+### 1. Quality Control
+- Validate synthetic data against real data distributions
+- Use quality assessment metrics regularly
+- Implement feedback loops for improvement
+- Test models on real data to validate transfer
+
+### 2. Domain Randomization Strategy
+- Start with minimal randomization
+- Gradually increase complexity
+- Focus on relevant variations for your task
+- Monitor model performance during randomization
+
+### 3. Computational Efficiency
+- Use appropriate scene complexity
+- Optimize rendering settings for speed
+- Implement progressive generation
+- Consider distributed generation
+
+### 4. Data Pipeline Management
+- Version control for synthetic datasets
+- Automated quality checks
+- Efficient storage and retrieval
+- Documentation of generation parameters
+
+## Troubleshooting Common Issues
+
+### Rendering Artifacts
+- Check material properties and PBR compliance
+- Verify lighting setup and intensity
+- Adjust camera parameters and clipping planes
+- Validate geometry and texture coordinates
+
+### Performance Issues
+- Reduce scene complexity
+- Use level-of-detail systems
+- Optimize material complexity
+- Consider multi-GPU setups
+
+### Sim-to-Real Transfer Problems
+- Analyze domain gap systematically
+- Adjust randomization parameters
+- Add real data to training set
+- Use domain adaptation techniques
+
+## Summary
+
+Photorealistic simulation and synthetic data generation with NVIDIA Isaac provide powerful tools for accelerating AI development in robotics. The combination of physically accurate rendering, domain randomization, and automatic annotation creates high-quality training datasets that can significantly reduce the time and cost of developing perception systems for humanoid robots.
+
+Key advantages include:
+- Rapid generation of diverse, labeled training data
+- Safe testing of edge cases and failure scenarios
+- Consistent, reproducible experimental conditions
+- Cost-effective alternative to real-world data collection
+
+The success of synthetic data approaches depends on careful attention to rendering quality, appropriate domain randomization strategies, and thorough validation of sim-to-real transfer capabilities. As we continue through this module, we'll explore how these synthetic data capabilities integrate with Isaac's other features for comprehensive AI robotics development.
+
+In the next chapter, we'll examine Isaac ROS in detail, focusing on hardware-accelerated robotics capabilities.

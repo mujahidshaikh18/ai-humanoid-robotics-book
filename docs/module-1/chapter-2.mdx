@@ -1,0 +1,250 @@
+---
+sidebar_position: 2
+title: 'Chapter 2: ROS 2 Core Architecture'
+---
+
+# ROS 2 Core Architecture
+
+## Overview
+
+This chapter delves into the fundamental architecture of ROS 2, exploring its design principles, communication mechanisms, and system organization. Understanding the core architecture is essential for building robust robotic applications.
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+- Describe the key architectural components of ROS 2
+- Explain the communication patterns in ROS 2 (topics, services, actions)
+- Understand the role of DDS in ROS 2 communication
+- Implement basic communication patterns in ROS 2
+
+## Architecture Overview
+
+ROS 2 follows a distributed architecture where multiple processes (nodes) communicate with each other over a network. The architecture is built on top of DDS (Data Distribution Service), which provides the underlying communication infrastructure.
+
+### The ROS 2 Stack
+
+The ROS 2 stack consists of several layers:
+
+```
+┌─────────────────┐
+│   Application   │  ← User applications and nodes
+├─────────────────┤
+│   ROS 2 Client  │  ← rclcpp, rclpy, etc.
+│   Libraries (rcl)│
+├─────────────────┤
+│   DDS Abstraction│ ← rmw (ROS Middleware)
+├─────────────────┤
+│   DDS Implementation│ ← Fast DDS, Cyclone DDS, etc.
+└─────────────────┘
+```
+
+## DDS (Data Distribution Service)
+
+DDS is the middleware that ROS 2 uses for communication. It provides a publish-subscribe communication model with quality of service (QoS) settings.
+
+### Key Features of DDS
+
+1. **Data-Centric**: Focuses on data rather than communication endpoints
+2. **Quality of Service (QoS)**: Configurable policies for reliability, durability, etc.
+3. **Discovery**: Automatic discovery of publishers and subscribers
+4. **Real-time Support**: Designed for real-time applications
+
+### QoS Policies
+
+ROS 2 provides several QoS policies that control communication behavior:
+
+```python
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+
+# Create a QoS profile for reliable communication
+qos_profile = QoSProfile(
+    depth=10,  # Number of messages to queue
+    reliability=ReliabilityPolicy.RELIABLE,  # Ensure all messages are delivered
+    history=HistoryPolicy.KEEP_LAST  # Keep only the last N messages
+)
+```
+
+## Communication Patterns
+
+### Topics (Publish-Subscribe)
+
+Topics implement a publish-subscribe communication pattern where publishers send messages to topics and subscribers receive messages from topics.
+
+```python
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+
+class Talker(Node):
+    def __init__(self):
+        super().__init__('talker')
+        self.publisher = self.create_publisher(String, 'chatter', 10)
+        timer_period = 0.5
+        self.timer = self.create_timer(timer_period, self.timer_callback)
+
+    def timer_callback(self):
+        msg = String()
+        msg.data = 'Hello ROS 2 World'
+        self.publisher.publish(msg)
+        self.get_logger().info(f'Publishing: {msg.data}')
+
+class Listener(Node):
+    def __init__(self):
+        super().__init__('listener')
+        self.subscription = self.create_subscription(
+            String,
+            'chatter',
+            self.listener_callback,
+            10)
+        self.subscription  # Prevent unused variable warning
+
+    def listener_callback(self, msg):
+        self.get_logger().info(f'I heard: {msg.data}')
+```
+
+### Services (Request-Reply)
+
+Services provide synchronous request-reply communication between nodes.
+
+```python
+import rclpy
+from rclpy.node import Node
+from example_interfaces.srv import AddTwoInts
+
+class MinimalService(Node):
+    def __init__(self):
+        super().__init__('minimal_service')
+        self.srv = self.create_service(AddTwoInts, 'add_two_ints', self.add_two_ints_callback)
+
+    def add_two_ints_callback(self, request, response):
+        response.sum = request.a + request.b
+        self.get_logger().info(f'Returning {request.a} + {request.b} = {response.sum}')
+        return response
+
+def main():
+    rclpy.init()
+    minimal_service = MinimalService()
+    rclpy.spin(minimal_service)
+    rclpy.shutdown()
+```
+
+### Actions (Long-Running Tasks)
+
+Actions are designed for long-running tasks that may provide feedback and can be canceled.
+
+```python
+import rclpy
+from rclpy.action import ActionServer
+from rclpy.node import Node
+from example_interfaces.action import Fibonacci
+
+class FibonacciActionServer(Node):
+    def __init__(self):
+        super().__init__('fibonacci_action_server')
+        self._action_server = ActionServer(
+            self,
+            Fibonacci,
+            'fibonacci',
+            self.execute_callback)
+
+    def execute_callback(self, goal_handle):
+        self.get_logger().info('Executing goal...')
+
+        feedback_msg = Fibonacci.Feedback()
+        feedback_msg.sequence = [0, 1]
+
+        for i in range(1, goal_handle.request.order):
+            feedback_msg.sequence.append(
+                feedback_msg.sequence[i] + feedback_msg.sequence[i-1])
+
+            self.get_logger().info(f'Feedback: {feedback_msg.sequence}')
+            goal_handle.publish_feedback(feedback_msg)
+
+        goal_handle.succeed()
+        result = Fibonacci.Result()
+        result.sequence = feedback_msg.sequence
+        return result
+```
+
+## Nodes and Processes
+
+In ROS 2, nodes are individual processes that perform computation. Multiple nodes can run on the same machine or be distributed across multiple machines.
+
+### Node Lifecycle
+
+Nodes in ROS 2 follow a specific lifecycle:
+
+```python
+from lifecycle_py.lifecycle_node import LifecycleNode
+from lifecycle_msgs.msg import State
+
+class LifecycleTalker(LifecycleNode):
+    def __init__(self):
+        super().__init__('lifecycle_talker')
+
+    def on_configure(self, state):
+        self.get_logger().info(f'Configuring node: {state}')
+        # Create publisher but don't allow publishing yet
+        self.pub = self.create_publisher(String, 'chatter', 10)
+        return super().on_configure(state)
+
+    def on_activate(self, state):
+        self.get_logger().info(f'Activating node: {state}')
+        # Now we can publish messages
+        return super().on_activate(state)
+```
+
+## Parameters
+
+Parameters in ROS 2 allow for configuration of nodes at runtime.
+
+```python
+class ParameterNode(Node):
+    def __init__(self):
+        super().__init__('parameter_node')
+
+        # Declare a parameter with a default value
+        self.declare_parameter('my_parameter', 'default_value')
+
+        # Get the parameter value
+        param_value = self.get_parameter('my_parameter').value
+        self.get_logger().info(f'Parameter value: {param_value}')
+
+        # Create a callback for parameter changes
+        self.add_on_set_parameters_callback(self.parameter_callback)
+
+    def parameter_callback(self, params):
+        for param in params:
+            if param.name == 'my_parameter':
+                self.get_logger().info(f'Parameter changed to: {param.value}')
+        return SetParametersResult(successful=True)
+```
+
+## Launch Files
+
+Launch files allow you to start multiple nodes with a single command.
+
+```python
+from launch import LaunchDescription
+from launch_ros.actions import Node
+
+def generate_launch_description():
+    return LaunchDescription([
+        Node(
+            package='demo_nodes_py',
+            executable='talker',
+            name='talker',
+        ),
+        Node(
+            package='demo_nodes_py',
+            executable='listener',
+            name='listener',
+        ),
+    ])
+```
+
+## Summary
+
+This chapter covered the core architecture of ROS 2, including its communication patterns, DDS middleware, and system organization. Understanding these concepts is crucial for building effective robotic applications with ROS 2.
+
+In the next chapter, we'll explore building ROS 2 packages in Python, where we'll put these architectural concepts into practice.

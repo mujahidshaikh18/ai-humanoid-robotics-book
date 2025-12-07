@@ -1,0 +1,1098 @@
+---
+sidebar_position: 17
+title: 'Chapter 17: Voice-to-Action with Whisper'
+---
+
+# Voice-to-Action with Whisper
+
+## Overview
+
+Voice-to-action systems enable humanoid robots to understand and execute spoken commands, providing a natural and intuitive interface for human-robot interaction. OpenAI's Whisper model has revolutionized automatic speech recognition (ASR) by providing robust, multilingual transcription capabilities that can be integrated into robotics applications. This chapter explores the implementation of Whisper-based voice-to-action systems for humanoid robots.
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+- Understand the architecture and capabilities of Whisper for speech recognition
+- Implement Whisper integration for real-time voice command processing
+- Design voice command grammars and parsing systems
+- Handle speech recognition challenges in robotics environments
+- Integrate voice-to-action with other VLA system components
+
+## Introduction to Whisper for Robotics
+
+### Whisper Architecture
+
+Whisper is a general-purpose speech recognition model developed by OpenAI that excels at transcribing audio across multiple languages. For robotics applications, Whisper offers several advantages:
+
+1. **Robustness**: Performs well in noisy environments
+2. **Multilingual**: Supports multiple languages without retraining
+3. **Zero-shot**: Can transcribe without domain-specific fine-tuning
+4. **Real-time Capability**: Can be optimized for real-time processing
+
+### Whisper in Robotics Context
+
+In humanoid robotics, Whisper serves as the bridge between human speech and robot action execution:
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Human Voice   │    │   Whisper ASR   │    │   Command       │
+│   Commands      │───▶│   (Transcribe)  │───▶│   Processing    │
+│   (Audio)       │    │   (Text)        │    │   (Parse &      │
+│                 │    │                 │    │   Execute)      │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────┐    ┌─────────────────┐    └─────────────────┐
+│   Microphone    │    │   Text Buffer   │    │   Robot Action  │
+│   Array         │    │   & Processing  │    │   Execution     │
+│   (Capture)     │    │   (Filter &     │    │   (Movement,    │
+│                 │    │   Interpret)    │    │   Manipulation) │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+## Whisper Integration Implementation
+
+### Basic Whisper Setup
+
+```python
+import torch
+import whisper
+import numpy as np
+import pyaudio
+import wave
+import threading
+import queue
+import time
+from dataclasses import dataclass
+from typing import Optional, Callable, List
+
+@dataclass
+class VoiceCommand:
+    """Structure for processed voice commands"""
+    text: str
+    confidence: float
+    timestamp: float
+    command_type: str
+    parameters: dict
+
+class WhisperVoiceProcessor:
+    def __init__(self, model_size="base", device=None):
+        """
+        Initialize Whisper voice processor
+
+        Args:
+            model_size: Size of Whisper model ('tiny', 'base', 'small', 'medium', 'large')
+            device: Device to run model on ('cpu', 'cuda', or None for auto)
+        """
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Load Whisper model
+        print(f"Loading Whisper {model_size} model on {self.device}...")
+        self.model = whisper.load_model(model_size).to(self.device)
+
+        # Audio parameters
+        self.sample_rate = 16000  # Whisper expects 16kHz
+        self.chunk_size = 1024   # Audio chunk size for streaming
+        self.audio_format = pyaudio.paInt16
+        self.channels = 1
+
+        # Audio recording setup
+        self.audio = pyaudio.PyAudio()
+        self.stream = None
+        self.is_listening = False
+
+        # Command processing
+        self.command_queue = queue.Queue()
+        self.audio_buffer = []
+        self.min_audio_length = 0.5  # Minimum audio length in seconds
+        self.max_audio_length = 10.0  # Maximum audio length in seconds
+
+        # Callbacks
+        self.command_callbacks = []
+        self.listening_callbacks = []
+
+    def start_listening(self):
+        """Start audio recording and voice processing"""
+        if self.is_listening:
+            return
+
+        self.is_listening = True
+
+        # Open audio stream
+        self.stream = self.audio.open(
+            format=self.audio_format,
+            channels=self.channels,
+            rate=self.sample_rate,
+            input=True,
+            frames_per_buffer=self.chunk_size
+        )
+
+        # Start recording thread
+        self.recording_thread = threading.Thread(target=self._recording_loop)
+        self.recording_thread.daemon = True
+        self.recording_thread.start()
+
+        # Start processing thread
+        self.processing_thread = threading.Thread(target=self._processing_loop)
+        self.processing_thread.daemon = True
+        self.processing_thread.start()
+
+        # Notify listeners
+        for callback in self.listening_callbacks:
+            callback("started")
+
+    def stop_listening(self):
+        """Stop audio recording and voice processing"""
+        self.is_listening = False
+
+        if self.stream:
+            self.stream.stop_stream()
+            self.stream.close()
+            self.stream = None
+
+        # Notify listeners
+        for callback in self.listening_callbacks:
+            callback("stopped")
+
+    def _recording_loop(self):
+        """Continuous audio recording loop"""
+        print("Voice recording started...")
+
+        while self.is_listening:
+            try:
+                # Read audio chunk
+                data = self.stream.read(self.chunk_size, exception_on_overflow=False)
+                audio_array = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+
+                # Add to buffer
+                self.audio_buffer.extend(audio_array)
+
+                # Limit buffer size to prevent excessive memory usage
+                max_buffer_samples = int(self.max_audio_length * self.sample_rate)
+                if len(self.audio_buffer) > max_buffer_samples:
+                    self.audio_buffer = self.audio_buffer[-max_buffer_samples:]
+
+            except Exception as e:
+                print(f"Recording error: {e}")
+                time.sleep(0.1)
+
+    def _processing_loop(self):
+        """Continuous audio processing loop"""
+        last_process_time = time.time()
+
+        while self.is_listening:
+            try:
+                current_time = time.time()
+
+                # Process audio if enough time has passed and buffer has sufficient audio
+                if (current_time - last_process_time > 0.5 and  # Process every 0.5 seconds
+                    len(self.audio_buffer) > self.min_audio_length * self.sample_rate):
+
+                    # Convert to numpy array
+                    audio_np = np.array(self.audio_buffer)
+
+                    # Check if audio has sufficient energy (not just noise)
+                    if self._has_sufficient_energy(audio_np):
+                        # Process the audio
+                        self._process_audio_chunk(audio_np)
+                        # Clear processed audio (keep some overlap for continuity)
+                        keep_samples = int(0.5 * self.sample_rate)  # Keep 0.5s overlap
+                        self.audio_buffer = self.audio_buffer[-keep_samples:]
+                    else:
+                        # Clear buffer if it's just noise
+                        self.audio_buffer = self.audio_buffer[-int(0.5 * self.sample_rate):]
+
+                    last_process_time = current_time
+                else:
+                    time.sleep(0.1)
+
+            except Exception as e:
+                print(f"Processing error: {e}")
+                time.sleep(0.1)
+
+    def _has_sufficient_energy(self, audio_data):
+        """Check if audio has sufficient energy to be speech"""
+        energy = np.mean(np.abs(audio_data))
+        return energy > 0.01  # Threshold for speech detection
+
+    def _process_audio_chunk(self, audio_chunk):
+        """Process an audio chunk with Whisper"""
+        try:
+            # Transcribe audio using Whisper
+            result = self.model.transcribe(
+                audio_chunk,
+                language='en',  # Can be changed or set to None for auto-detection
+                fp16=self.device == 'cuda'
+            )
+
+            if result and result["text"].strip():
+                # Calculate confidence based on log probability
+                confidence = self._calculate_confidence(result)
+
+                # Create voice command
+                command = VoiceCommand(
+                    text=result["text"].strip(),
+                    confidence=confidence,
+                    timestamp=time.time(),
+                    command_type="speech",
+                    parameters={}
+                )
+
+                # Add to command queue
+                self.command_queue.put(command)
+
+                # Process command
+                self._process_voice_command(command)
+
+        except Exception as e:
+            print(f"Whisper processing error: {e}")
+
+    def _calculate_confidence(self, result):
+        """Calculate confidence score from Whisper result"""
+        # Use average log probability if available
+        if "avg_logprob" in result:
+            # Convert log probability to confidence (higher is better)
+            # Log prob is typically negative, so we use its absolute value
+            avg_logprob = result["avg_logprob"]
+            # Normalize to 0-1 range (this is a simplified approach)
+            confidence = max(0, min(1, (avg_logprob + 2.0) / 2.0))  # Adjust range as needed
+        else:
+            # Fallback confidence
+            confidence = 0.8
+
+        return confidence
+
+    def _process_voice_command(self, command):
+        """Process recognized voice command"""
+        if command.confidence > 0.5:  # Only process confident transcriptions
+            print(f"Recognized: '{command.text}' (confidence: {command.confidence:.2f})")
+
+            # Notify all command callbacks
+            for callback in self.command_callbacks:
+                try:
+                    callback(command)
+                except Exception as e:
+                    print(f"Command callback error: {e}")
+
+    def add_command_callback(self, callback: Callable[[VoiceCommand], None]):
+        """Add callback for processed voice commands"""
+        self.command_callbacks.append(callback)
+
+    def add_listening_callback(self, callback: Callable[[str], None]):
+        """Add callback for listening state changes"""
+        self.listening_callbacks.append(callback)
+
+    def get_latest_commands(self, max_commands=5) -> List[VoiceCommand]:
+        """Get latest voice commands from queue"""
+        commands = []
+        while not self.command_queue.empty() and len(commands) < max_commands:
+            try:
+                command = self.command_queue.get_nowait()
+                commands.append(command)
+            except queue.Empty:
+                break
+        return commands
+```
+
+## Voice Command Grammar and Parsing
+
+### Command Grammar System
+
+```python
+import re
+from typing import Dict, List, Tuple, Optional
+import json
+
+class VoiceCommandGrammar:
+    def __init__(self):
+        # Define command patterns
+        self.command_patterns = {
+            # Movement commands
+            "move_forward": {
+                "patterns": [
+                    r"move forward(?: by (\d+(?:\.\d+)?))?",
+                    r"go forward(?: by (\d+(?:\.\d+)?))?",
+                    r"walk forward(?: by (\d+(?:\.\d+)?))?"
+                ],
+                "action": "move",
+                "params": {"direction": "forward"}
+            },
+            "move_backward": {
+                "patterns": [
+                    r"move backward(?: by (\d+(?:\.\d+)?))?",
+                    r"go backward(?: by (\d+(?:\.\d+)?))?",
+                    r"walk backward(?: by (\d+(?:\.\d+)?))?"
+                ],
+                "action": "move",
+                "params": {"direction": "backward"}
+            },
+            "turn": {
+                "patterns": [
+                    r"turn (left|right)(?: by (\d+(?:\.\d+)?))?",
+                    r"rotate (left|right)(?: by (\d+(?:\.\d+)?))?",
+                    r"pivot (left|right)(?: by (\d+(?:\.\d+)?))?"
+                ],
+                "action": "turn",
+                "params": {}
+            },
+            "pick_object": {
+                "patterns": [
+                    r"pick up (?:the )?(.+)",
+                    r"grab (?:the )?(.+)",
+                    r"take (?:the )?(.+)",
+                    r"get (?:the )?(.+)"
+                ],
+                "action": "pick",
+                "params": {}
+            },
+            "place_object": {
+                "patterns": [
+                    r"place (?:the )?(.+) (?:on|at|in) (?:the )?(.+)",
+                    r"put (?:the )?(.+) (?:on|at|in) (?:the )?(.+)",
+                    r"set (?:the )?(.+) (?:on|at|in) (?:the )?(.+)"
+                ],
+                "action": "place",
+                "params": {}
+            },
+            "look_at": {
+                "patterns": [
+                    r"look at (?:the )?(.+)",
+                    r"face (?:the )?(.+)",
+                    r"turn to (?:the )?(.+)",
+                    r"find (?:the )?(.+)"
+                ],
+                "action": "look_at",
+                "params": {}
+            },
+            "stop": {
+                "patterns": [
+                    r"stop",
+                    r"halt",
+                    r"freeze",
+                    r"wait"
+                ],
+                "action": "stop",
+                "params": {}
+            },
+            "greet": {
+                "patterns": [
+                    r"hello",
+                    r"hi",
+                    r"greetings",
+                    r"hey"
+                ],
+                "action": "greet",
+                "params": {}
+            }
+        }
+
+    def parse_command(self, text: str) -> Optional[Dict]:
+        """Parse voice command text into structured action"""
+        text_lower = text.lower().strip()
+
+        for command_type, config in self.command_patterns.items():
+            for pattern in config["patterns"]:
+                match = re.search(pattern, text_lower)
+                if match:
+                    # Extract parameters from regex groups
+                    groups = match.groups()
+
+                    # Create action with base parameters
+                    action = {
+                        "type": config["action"],
+                        "command_type": command_type,
+                        "original_text": text,
+                        "parameters": config["params"].copy()
+                    }
+
+                    # Add extracted parameters
+                    if config["action"] == "turn" and len(groups) >= 1:
+                        action["parameters"]["direction"] = groups[0]
+                        if len(groups) > 1:
+                            try:
+                                action["parameters"]["angle"] = float(groups[1])
+                            except ValueError:
+                                action["parameters"]["angle"] = 90.0  # Default turn angle
+                    elif config["action"] in ["pick", "look_at"] and len(groups) >= 1:
+                        action["parameters"]["target"] = groups[0]
+                    elif config["action"] == "place" and len(groups) >= 2:
+                        action["parameters"]["object"] = groups[0]
+                        action["parameters"]["location"] = groups[1]
+                    elif config["action"] == "move" and len(groups) >= 1:
+                        try:
+                            action["parameters"]["distance"] = float(groups[0])
+                        except (ValueError, IndexError):
+                            action["parameters"]["distance"] = 1.0  # Default distance
+
+                    return action
+
+        # If no pattern matches, return a general command
+        return {
+            "type": "general",
+            "command_type": "unknown",
+            "original_text": text,
+            "parameters": {"text": text}
+        }
+
+class VoiceCommandProcessor:
+    def __init__(self):
+        self.grammar = VoiceCommandGrammar()
+        self.context = {}  # Store conversation context
+        self.command_history = []  # Store command history
+
+    def process_voice_command(self, voice_command: VoiceCommand) -> Optional[Dict]:
+        """Process a voice command and return structured action"""
+        if voice_command.confidence < 0.6:  # Only process confident commands
+            return None
+
+        # Parse the command using grammar
+        action = self.grammar.parse_command(voice_command.text)
+
+        if action:
+            # Add metadata
+            action["confidence"] = voice_command.confidence
+            action["timestamp"] = voice_command.timestamp
+
+            # Store in history
+            self.command_history.append(action)
+
+            # Keep only recent commands (last 100)
+            if len(self.command_history) > 100:
+                self.command_history = self.command_history[-100:]
+
+            return action
+
+        return None
+
+    def handle_command_with_context(self, voice_command: VoiceCommand) -> Optional[Dict]:
+        """Process command with context awareness"""
+        action = self.process_voice_command(voice_command)
+
+        if action and "target" in action["parameters"]:
+            # Resolve relative references using context
+            target = action["parameters"]["target"]
+
+            # Handle pronouns and relative references
+            if target in ["it", "that", "this", "the object", "the item"]:
+                # Use last mentioned object from context
+                last_object = self.context.get("last_mentioned_object")
+                if last_object:
+                    action["parameters"]["target"] = last_object
+
+            # Store target in context for future reference
+            self.context["last_mentioned_object"] = action["parameters"]["target"]
+
+        return action
+```
+
+## Real-Time Voice Processing
+
+### Streaming Voice Recognition
+
+```python
+import asyncio
+import threading
+from concurrent.futures import ThreadPoolExecutor
+import time
+
+class StreamingVoiceRecognizer:
+    def __init__(self, whisper_processor: WhisperVoiceProcessor):
+        self.whisper_processor = whisper_processor
+        self.executor = ThreadPoolExecutor(max_workers=2)
+        self.is_streaming = False
+        self.voice_activity = False
+        self.silence_threshold = 0.01
+        self.speech_threshold = 0.05
+        self.silence_duration = 0.0
+        self.min_speech_duration = 0.3  # Minimum speech duration to trigger recognition
+
+    def start_streaming(self):
+        """Start streaming voice recognition"""
+        self.is_streaming = True
+        self.whisper_processor.start_listening()
+
+    def stop_streaming(self):
+        """Stop streaming voice recognition"""
+        self.is_streaming = False
+        self.whisper_processor.stop_listening()
+
+    def is_voice_active(self, audio_chunk):
+        """Detect if voice is active in audio chunk"""
+        energy = np.mean(np.abs(audio_chunk))
+
+        if energy > self.speech_threshold:
+            self.silence_duration = 0
+            return True
+        else:
+            self.silence_duration += len(audio_chunk) / self.whisper_processor.sample_rate
+            return self.silence_duration < 0.5  # Consider voice active if silence < 0.5s
+
+    def handle_voice_activity(self, is_active: bool):
+        """Handle voice activity changes"""
+        if is_active and not self.voice_activity:
+            # Voice started - prepare for recognition
+            self.voice_activity = True
+            print("Voice activity detected - preparing for recognition")
+        elif not is_active and self.voice_activity:
+            # Voice stopped - trigger recognition
+            self.voice_activity = False
+            print("Voice activity ended - processing command")
+```
+
+## Voice Command Integration with Robotics
+
+### Robot Action Execution
+
+```python
+import math
+from dataclasses import dataclass
+from typing import Dict, Any, Optional
+
+@dataclass
+class RobotAction:
+    """Structure for robot actions"""
+    action_type: str
+    parameters: Dict[str, Any]
+    priority: int = 1
+    timeout: float = 10.0
+
+class VoiceToActionController:
+    def __init__(self, robot_interface=None):
+        self.robot_interface = robot_interface
+        self.command_processor = VoiceCommandProcessor()
+        self.active_actions = []
+        self.action_queue = []
+        self.is_executing = False
+
+    def process_voice_command(self, voice_command: VoiceCommand):
+        """Process voice command and queue robot action"""
+        # Parse the command
+        action = self.command_processor.handle_command_with_context(voice_command)
+
+        if action:
+            # Convert to robot action
+            robot_action = self._convert_to_robot_action(action)
+
+            if robot_action:
+                # Add to execution queue
+                self.action_queue.append(robot_action)
+
+                # Start execution if not already running
+                if not self.is_executing:
+                    self._execute_action_queue()
+
+    def _convert_to_robot_action(self, action: Dict) -> Optional[RobotAction]:
+        """Convert parsed action to robot action"""
+        action_type = action["type"]
+
+        if action_type == "move":
+            direction = action["parameters"].get("direction", "forward")
+            distance = action["parameters"].get("distance", 1.0)
+
+            return RobotAction(
+                action_type="navigate",
+                parameters={
+                    "direction": direction,
+                    "distance": distance,
+                    "speed": 0.5
+                }
+            )
+
+        elif action_type == "turn":
+            direction = action["parameters"].get("direction", "left")
+            angle = action["parameters"].get("angle", 90.0)
+
+            return RobotAction(
+                action_type="rotate",
+                parameters={
+                    "direction": direction,
+                    "angle": math.radians(angle),
+                    "speed": 0.5
+                }
+            )
+
+        elif action_type == "pick":
+            target = action["parameters"].get("target", "")
+
+            return RobotAction(
+                action_type="manipulation",
+                parameters={
+                    "action": "pick",
+                    "target_object": target
+                }
+            )
+
+        elif action_type == "place":
+            obj = action["parameters"].get("object", "")
+            location = action["parameters"].get("location", "default")
+
+            return RobotAction(
+                action_type="manipulation",
+                parameters={
+                    "action": "place",
+                    "object": obj,
+                    "location": location
+                }
+            )
+
+        elif action_type == "look_at":
+            target = action["parameters"].get("target", "")
+
+            return RobotAction(
+                action_type="look_at",
+                parameters={
+                    "target": target
+                }
+            )
+
+        elif action_type == "stop":
+            return RobotAction(
+                action_type="stop",
+                parameters={}
+            )
+
+        elif action_type == "greet":
+            return RobotAction(
+                action_type="speak",
+                parameters={
+                    "text": "Hello! How can I help you today?",
+                    "voice_pitch": 1.0
+                }
+            )
+
+        return None
+
+    def _execute_action_queue(self):
+        """Execute actions in the queue"""
+        if not self.action_queue or self.is_executing:
+            return
+
+        self.is_executing = True
+
+        while self.action_queue and self.is_executing:
+            action = self.action_queue.pop(0)
+            self.active_actions.append(action)
+
+            try:
+                success = self._execute_single_action(action)
+
+                if success:
+                    print(f"Successfully executed action: {action.action_type}")
+                else:
+                    print(f"Failed to execute action: {action.action_type}")
+
+            except Exception as e:
+                print(f"Error executing action {action.action_type}: {e}")
+            finally:
+                # Remove from active actions
+                if action in self.active_actions:
+                    self.active_actions.remove(action)
+
+        self.is_executing = False
+
+    def _execute_single_action(self, action: RobotAction) -> bool:
+        """Execute a single robot action"""
+        if not self.robot_interface:
+            print(f"Simulating action: {action.action_type} with params: {action.parameters}")
+            # Simulate action execution
+            time.sleep(0.5)  # Simulate execution time
+            return True
+
+        # Execute actual robot action based on type
+        try:
+            if action.action_type == "navigate":
+                return self._execute_navigation(action.parameters)
+            elif action.action_type == "rotate":
+                return self._execute_rotation(action.parameters)
+            elif action.action_type == "manipulation":
+                return self._execute_manipulation(action.parameters)
+            elif action.action_type == "look_at":
+                return self._execute_look_at(action.parameters)
+            elif action.action_type == "stop":
+                return self._execute_stop()
+            elif action.action_type == "speak":
+                return self._execute_speak(action.parameters)
+            else:
+                print(f"Unknown action type: {action.action_type}")
+                return False
+        except Exception as e:
+            print(f"Error executing action: {e}")
+            return False
+
+    def _execute_navigation(self, params: Dict) -> bool:
+        """Execute navigation action"""
+        # This would interface with the robot's navigation system
+        direction = params.get("direction", "forward")
+        distance = params.get("distance", 1.0)
+        speed = params.get("speed", 0.5)
+
+        print(f"Navigating {direction} for {distance}m at speed {speed}")
+        # In real implementation: call navigation API
+        return True
+
+    def _execute_rotation(self, params: Dict) -> bool:
+        """Execute rotation action"""
+        direction = params.get("direction", "left")
+        angle = params.get("angle", math.pi/2)  # Default 90 degrees
+        speed = params.get("speed", 0.5)
+
+        print(f"Rotating {direction} by {math.degrees(angle)} degrees")
+        # In real implementation: call rotation API
+        return True
+
+    def _execute_manipulation(self, params: Dict) -> bool:
+        """Execute manipulation action"""
+        action = params.get("action", "pick")
+        target = params.get("target_object", "") or params.get("object", "")
+
+        print(f"Manipulation: {action} {target}")
+        # In real implementation: call manipulation API
+        return True
+
+    def _execute_look_at(self, params: Dict) -> bool:
+        """Execute look at action"""
+        target = params.get("target", "")
+
+        print(f"Looking at: {target}")
+        # In real implementation: call head/eye control API
+        return True
+
+    def _execute_stop(self) -> bool:
+        """Execute stop action"""
+        print("Stopping all robot motion")
+        # In real implementation: call emergency stop or halt API
+        return True
+
+    def _execute_speak(self, params: Dict) -> bool:
+        """Execute speech action"""
+        text = params.get("text", "")
+        pitch = params.get("voice_pitch", 1.0)
+
+        print(f"Speaking: {text}")
+        # In real implementation: call text-to-speech API
+        return True
+```
+
+## Noise Reduction and Audio Enhancement
+
+### Audio Preprocessing for Robotics
+
+```python
+import soundfile as sf
+import librosa
+from scipy import signal
+import webrtcvad  # For voice activity detection
+
+class AudioPreprocessor:
+    def __init__(self):
+        # Initialize WebRTC VAD
+        self.vad = webrtcvad.Vad()
+        self.vad.set_mode(1)  # Aggressiveness mode (0-3)
+
+    def denoise_audio(self, audio_data, sample_rate=16000):
+        """Apply noise reduction to audio"""
+        try:
+            # Use librosa for noise reduction
+            # This is a simplified approach - real implementation would use more sophisticated methods
+            denoised = librosa.effects.percussive(audio_data)
+            return denoised
+        except:
+            # If librosa fails, return original audio
+            return audio_data
+
+    def apply_audio_filters(self, audio_data, sample_rate=16000):
+        """Apply various audio filters to improve quality"""
+        # Normalize audio
+        audio_data = audio_data / np.max(np.abs(audio_data)) if np.max(np.abs(audio_data)) != 0 else audio_data
+
+        # Apply high-pass filter to remove low-frequency noise
+        b, a = signal.butter(4, 100 / (sample_rate / 2), btype='high')
+        filtered_audio = signal.filtfilt(b, a, audio_data)
+
+        return filtered_audio
+
+    def detect_voice_activity(self, audio_data, sample_rate=16000):
+        """Detect voice activity in audio chunk"""
+        # Convert to appropriate format for WebRTC VAD
+        # WebRTC VAD requires 16kHz, 16-bit PCM
+        if sample_rate != 16000:
+            audio_data = librosa.resample(audio_data, orig_sr=sample_rate, target_sr=16000)
+
+        # Convert to 16-bit integers
+        audio_int16 = (audio_data * 32767).astype(np.int16)
+
+        # WebRTC VAD works on 10, 20, or 30 ms frames
+        frame_size = int(16000 * 0.02)  # 20ms frame
+        frames = [audio_int16[i:i+frame_size] for i in range(0, len(audio_int16), frame_size)]
+
+        voice_active = False
+        for frame in frames:
+            if len(frame) == frame_size:
+                try:
+                    if self.vad.is_speech(frame.tobytes(), 16000):
+                        voice_active = True
+                        break
+                except:
+                    continue
+
+        return voice_active
+
+    def preprocess_audio_chunk(self, audio_chunk, sample_rate=16000):
+        """Complete preprocessing pipeline for audio chunk"""
+        # Apply filters
+        filtered_audio = self.apply_audio_filters(audio_chunk, sample_rate)
+
+        # Denoise (simplified)
+        denoised_audio = self.denoise_audio(filtered_audio, sample_rate)
+
+        # Detect voice activity
+        has_voice = self.detect_voice_activity(denoised_audio, sample_rate)
+
+        return denoised_audio, has_voice
+```
+
+## Integration with Humanoid Robot Systems
+
+### Complete Voice-to-Action System
+
+```python
+class CompleteVoiceToActionSystem:
+    def __init__(self, robot_interface=None):
+        # Initialize Whisper processor
+        self.whisper_processor = WhisperVoiceProcessor(model_size="base")
+
+        # Initialize audio preprocessor
+        self.audio_preprocessor = AudioPreprocessor()
+
+        # Initialize command processor
+        self.command_processor = VoiceCommandProcessor()
+
+        # Initialize action controller
+        self.action_controller = VoiceToActionController(robot_interface)
+
+        # Setup callbacks
+        self.whisper_processor.add_command_callback(self._handle_voice_command)
+
+        # System state
+        self.is_active = False
+        self.conversation_context = []
+
+    def start_system(self):
+        """Start the complete voice-to-action system"""
+        if not self.is_active:
+            self.is_active = True
+            self.whisper_processor.start_listening()
+            print("Voice-to-Action system started")
+
+    def stop_system(self):
+        """Stop the complete voice-to-action system"""
+        if self.is_active:
+            self.is_active = False
+            self.whisper_processor.stop_listening()
+            print("Voice-to-Action system stopped")
+
+    def _handle_voice_command(self, voice_command: VoiceCommand):
+        """Handle incoming voice command"""
+        print(f"Processing voice command: '{voice_command.text}' (confidence: {voice_command.confidence:.2f})")
+
+        # Add to conversation context
+        self.conversation_context.append({
+            "type": "user",
+            "text": voice_command.text,
+            "timestamp": voice_command.timestamp,
+            "confidence": voice_command.confidence
+        })
+
+        # Process with context awareness
+        action = self.command_processor.handle_command_with_context(voice_command)
+
+        if action:
+            print(f"Converted to action: {action}")
+
+            # Execute action
+            self.action_controller.process_voice_command(voice_command)
+
+            # Add to context
+            self.conversation_context.append({
+                "type": "system",
+                "action": action,
+                "timestamp": time.time()
+            })
+        else:
+            print("Could not parse command")
+
+    def get_system_status(self):
+        """Get current system status"""
+        return {
+            "is_active": self.is_active,
+            "listening": self.whisper_processor.is_listening,
+            "command_queue_size": len(self.action_controller.action_queue),
+            "active_actions": len(self.action_controller.active_actions),
+            "conversation_length": len(self.conversation_context)
+        }
+
+    def add_command_callback(self, callback):
+        """Add callback for processed commands"""
+        self.whisper_processor.add_command_callback(callback)
+
+    def process_direct_command(self, text: str):
+        """Process a text command directly (for testing or alternative input)"""
+        command = VoiceCommand(
+            text=text,
+            confidence=1.0,  # Direct input has maximum confidence
+            timestamp=time.time(),
+            command_type="text",
+            parameters={}
+        )
+
+        self._handle_voice_command(command)
+```
+
+## Performance Optimization
+
+### Real-Time Performance Considerations
+
+```python
+import psutil
+import GPUtil
+from collections import deque
+import statistics
+
+class VoiceToActionPerformanceMonitor:
+    def __init__(self):
+        self.processing_times = deque(maxlen=100)
+        self.cpu_usage = deque(maxlen=100)
+        self.gpu_usage = deque(maxlen=100)
+        self.memory_usage = deque(maxlen=100)
+
+    def start_monitoring(self):
+        """Start performance monitoring in background"""
+        self.monitoring_active = True
+        self.monitoring_thread = threading.Thread(target=self._monitor_loop)
+        self.monitoring_thread.daemon = True
+        self.monitoring_thread.start()
+
+    def _monitor_loop(self):
+        """Performance monitoring loop"""
+        while self.monitoring_active:
+            # CPU usage
+            cpu_percent = psutil.cpu_percent()
+            self.cpu_usage.append(cpu_percent)
+
+            # Memory usage
+            memory_percent = psutil.virtual_memory().percent
+            self.memory_usage.append(memory_percent)
+
+            # GPU usage (if available)
+            try:
+                gpus = GPUtil.getGPUs()
+                if gpus:
+                    gpu_percent = gpus[0].load * 100
+                    self.gpu_usage.append(gpu_percent)
+                else:
+                    self.gpu_usage.append(0)
+            except:
+                self.gpu_usage.append(0)
+
+            time.sleep(1)  # Monitor every second
+
+    def record_processing_time(self, processing_time):
+        """Record processing time for a command"""
+        self.processing_times.append(processing_time)
+
+    def get_performance_metrics(self):
+        """Get current performance metrics"""
+        metrics = {
+            "avg_processing_time": statistics.mean(self.processing_times) if self.processing_times else 0,
+            "max_processing_time": max(self.processing_times) if self.processing_times else 0,
+            "cpu_avg": statistics.mean(self.cpu_usage) if self.cpu_usage else 0,
+            "memory_avg": statistics.mean(self.memory_usage) if self.memory_usage else 0,
+            "gpu_avg": statistics.mean(self.gpu_usage) if self.gpu_usage else 0
+        }
+        return metrics
+```
+
+## Error Handling and Robustness
+
+### Handling Recognition Errors
+
+```python
+class VoiceCommandErrorHandler:
+    def __init__(self):
+        self.error_history = deque(maxlen=50)
+        self.uncertainty_threshold = 0.5
+        self.similarity_threshold = 0.8
+
+    def handle_recognition_error(self, command_text, confidence, original_command=None):
+        """Handle cases where recognition is uncertain"""
+        error_record = {
+            "command_text": command_text,
+            "confidence": confidence,
+            "timestamp": time.time(),
+            "original_command": original_command
+        }
+        self.error_history.append(error_record)
+
+        # If confidence is low, ask for clarification
+        if confidence < self.uncertainty_threshold:
+            return self._request_clarification(command_text)
+        else:
+            return command_text
+
+    def _request_clarification(self, command_text):
+        """Request user to clarify the command"""
+        suggestions = self._generate_command_suggestions(command_text)
+
+        if suggestions:
+            clarification_prompt = f"I didn't quite understand '{command_text}'. Did you mean: {', '.join(suggestions)}?"
+        else:
+            clarification_prompt = f"I didn't understand '{command_text}'. Could you please repeat that?"
+
+        return clarification_prompt
+
+    def _generate_command_suggestions(self, command_text):
+        """Generate possible command suggestions based on the input"""
+        # This would use command similarity or grammar rules
+        # For demonstration, returning some common alternatives
+        common_commands = [
+            "move forward", "turn left", "pick up object",
+            "place object", "stop", "look at object"
+        ]
+
+        suggestions = []
+        for cmd in common_commands:
+            similarity = self._calculate_similarity(command_text.lower(), cmd.lower())
+            if similarity > self.similarity_threshold:
+                suggestions.append(cmd)
+
+        return suggestions[:3]  # Return top 3 suggestions
+
+    def _calculate_similarity(self, text1, text2):
+        """Calculate similarity between two texts"""
+        # Simple word overlap similarity
+        words1 = set(text1.split())
+        words2 = set(text2.split())
+
+        intersection = words1.intersection(words2)
+        union = words1.union(words2)
+
+        return len(intersection) / len(union) if union else 0
+```
+
+## Summary
+
+Voice-to-action systems using Whisper provide a powerful interface for humanoid robots to understand and execute spoken commands. The integration involves several key components:
+
+1. **Audio Processing**: Capturing, filtering, and preprocessing audio input
+2. **Speech Recognition**: Using Whisper for accurate transcription
+3. **Command Parsing**: Converting natural language to structured robot commands
+4. **Action Execution**: Mapping commands to robot behaviors
+5. **Error Handling**: Managing recognition errors and uncertainties
+
+The success of voice-to-action systems in robotics depends on:
+- Robust speech recognition that works in noisy environments
+- Effective command parsing and natural language understanding
+- Safe and reliable action execution
+- Continuous learning and adaptation
+
+In the next chapter, we'll explore LLM-based cognitive planning, which represents the higher-level reasoning component of VLA systems, enabling humanoid robots to plan complex, multi-step tasks based on natural language commands.

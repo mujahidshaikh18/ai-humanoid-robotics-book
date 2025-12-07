@@ -1,0 +1,919 @@
+---
+sidebar_position: 5
+title: 'Chapter 5: Integrating AI Agents with ROS (rclpy)'
+---
+
+# Integrating AI Agents with ROS (rclpy)
+
+## Overview
+
+This chapter explores the integration of AI agents with ROS 2 using Python. We'll cover how to connect machine learning models, decision-making systems, and AI algorithms with ROS 2's communication infrastructure.
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+- Integrate AI models with ROS 2 nodes
+- Design AI-based decision-making systems
+- Handle sensor data for AI processing
+- Implement cognitive architectures for robotics
+- Use ROS 2 for AI model training and inference
+
+## AI in Robotics Context
+
+Artificial Intelligence in robotics encompasses perception, decision-making, and action execution. The integration of AI with ROS 2 enables robots to:
+- Process sensor data using machine learning models
+- Make intelligent decisions based on environmental understanding
+- Plan and execute complex behaviors
+- Learn from experience and adapt to new situations
+
+### AI-ROS Integration Architecture
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   AI Agent      │    │   ROS 2         │    │   Robot         │
+│                 │◄──►│   Infrastructure│◄──►│   Hardware      │
+│  - Perception   │    │  - Topics       │    │  - Sensors      │
+│  - Planning     │    │  - Services     │    │  - Actuators    │
+│  - Control      │    │  - Actions      │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+## Setting Up AI Libraries with ROS 2
+
+### Installing Required Libraries
+
+```bash
+pip install tensorflow torch torchvision scikit-learn
+# Or using apt for system packages
+sudo apt install python3-tensorflow python3-torch
+```
+
+### Basic AI Node Structure
+
+```python
+import rclpy
+from rclpy.node import Node
+import numpy as np
+import tensorflow as tf  # Example AI library
+
+class AIAgentNode(Node):
+    def __init__(self):
+        super().__init__('ai_agent_node')
+
+        # Initialize AI model
+        self.model = self.initialize_model()
+
+        # Create subscribers for sensor data
+        self.sensor_sub = self.create_subscription(
+            # Define your sensor message type
+            'sensor_msgs/msg/LaserScan',
+            'scan',
+            self.sensor_callback,
+            10
+        )
+
+        # Create publishers for AI decisions
+        self.action_pub = self.create_publisher(
+            # Define your action message type
+            'geometry_msgs/msg/Twist',
+            'cmd_vel',
+            10
+        )
+
+        # Create timer for AI processing
+        self.ai_timer = self.create_timer(0.1, self.ai_processing_loop)
+
+        self.get_logger().info('AI Agent Node initialized')
+
+    def initialize_model(self):
+        """Initialize and return your AI model"""
+        # Example: Load a pre-trained model
+        # model = tf.keras.models.load_model('path/to/model')
+        # For this example, we'll create a simple placeholder
+        return "placeholder_model"
+
+    def sensor_callback(self, msg):
+        """Process incoming sensor data"""
+        # Convert ROS message to format suitable for AI model
+        sensor_data = self.process_sensor_data(msg)
+
+        # Store data for AI processing
+        self.current_sensor_data = sensor_data
+
+    def process_sensor_data(self, msg):
+        """Convert ROS sensor message to AI-friendly format"""
+        # Implementation depends on message type
+        return np.array([])  # Placeholder
+
+    def ai_processing_loop(self):
+        """Main AI processing loop"""
+        if hasattr(self, 'current_sensor_data'):
+            # Run AI inference
+            action = self.run_inference(self.current_sensor_data)
+
+            # Publish AI decision
+            self.publish_action(action)
+
+    def run_inference(self, sensor_data):
+        """Run AI model inference"""
+        # Placeholder implementation
+        return np.array([0.0, 0.0])  # [linear_velocity, angular_velocity]
+
+    def publish_action(self, action):
+        """Publish AI decision to robot"""
+        from geometry_msgs.msg import Twist
+        msg = Twist()
+        msg.linear.x = float(action[0])
+        msg.angular.z = float(action[1])
+        self.action_pub.publish(msg)
+
+def main(args=None):
+    rclpy.init(args=args)
+    ai_agent_node = AIAgentNode()
+
+    try:
+        rclpy.spin(ai_agent_node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        ai_agent_node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+## Machine Learning Model Integration
+
+### TensorFlow/Keras Integration
+
+```python
+import rclpy
+from rclpy.node import Node
+import tensorflow as tf
+import numpy as np
+from sensor_msgs.msg import LaserScan
+from geometry_msgs.msg import Twist
+
+class MLNavigationNode(Node):
+    def __init__(self):
+        super().__init__('ml_navigation_node')
+
+        # Load pre-trained navigation model
+        self.navigation_model = self.load_navigation_model()
+
+        # Subscribers and publishers
+        self.scan_sub = self.create_subscription(
+            LaserScan,
+            'scan',
+            self.scan_callback,
+            10
+        )
+
+        self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
+
+        # Store latest sensor data
+        self.latest_scan = None
+
+        # Processing timer
+        self.process_timer = self.create_timer(0.1, self.process_data)
+
+    def load_navigation_model(self):
+        """Load pre-trained navigation model"""
+        try:
+            # Load your trained model
+            # model = tf.keras.models.load_model('navigation_model.h5')
+            # For this example, we'll create a simple model
+            model = tf.keras.Sequential([
+                tf.keras.layers.Dense(64, activation='relu', input_shape=(360,)),
+                tf.keras.layers.Dense(32, activation='relu'),
+                tf.keras.layers.Dense(2, activation='tanh')  # [linear, angular]
+            ])
+            return model
+        except Exception as e:
+            self.get_logger().error(f'Failed to load model: {e}')
+            return None
+
+    def scan_callback(self, msg):
+        """Process laser scan data"""
+        # Convert scan ranges to numpy array
+        ranges = np.array(msg.ranges)
+        # Handle infinite/nan values
+        ranges = np.nan_to_num(ranges, nan=10.0, posinf=10.0, neginf=0.0)
+
+        # Normalize ranges to [0, 1]
+        ranges = np.clip(ranges, 0.0, 10.0) / 10.0
+
+        self.latest_scan = ranges
+
+    def process_data(self):
+        """Process sensor data with ML model"""
+        if self.latest_scan is not None and self.navigation_model is not None:
+            # Ensure scan has correct shape
+            if len(self.latest_scan) == 360:  # Assuming 360-degree scan
+                # Add batch dimension
+                input_data = np.expand_dims(self.latest_scan, axis=0)
+
+                # Run inference
+                try:
+                    output = self.navigation_model.predict(input_data, verbose=0)
+
+                    # Extract velocities [linear, angular]
+                    linear_vel = float(output[0][0] * 0.5)  # Scale to reasonable speed
+                    angular_vel = float(output[0][1] * 1.0)  # Scale to reasonable rotation
+
+                    # Publish command
+                    self.publish_command(linear_vel, angular_vel)
+
+                except Exception as e:
+                    self.get_logger().error(f'Model inference failed: {e}')
+
+    def publish_command(self, linear, angular):
+        """Publish velocity command"""
+        msg = Twist()
+        msg.linear.x = linear
+        msg.angular.z = angular
+        self.cmd_pub.publish(msg)
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = MLNavigationNode()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+## Reinforcement Learning Integration
+
+### Basic RL Agent Node
+
+```python
+import rclpy
+from rclpy.node import Node
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sensor_msgs.msg import LaserScan
+from geometry_msgs.msg import Twist
+from std_msgs.msg import Float32
+
+class RLAgentNode(Node):
+    def __init__(self):
+        super().__init__('rl_agent_node')
+
+        # Initialize RL components
+        self.state_size = 360  # For laser scan
+        self.action_size = 2   # linear and angular velocity
+        self.learning_rate = 0.001
+
+        # Neural network for policy
+        self.policy_network = self.create_policy_network()
+        self.optimizer = optim.Adam(self.policy_network.parameters(),
+                                   lr=self.learning_rate)
+
+        # Subscribers and publishers
+        self.scan_sub = self.create_subscription(
+            LaserScan, 'scan', self.scan_callback, 10)
+        self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
+        self.reward_pub = self.create_publisher(Float32, 'reward', 10)
+
+        # Episode management
+        self.current_state = None
+        self.previous_state = None
+        self.episode_step = 0
+        self.max_episode_steps = 1000
+
+        # Learning timer
+        self.learning_timer = self.create_timer(0.1, self.learning_step)
+
+    def create_policy_network(self):
+        """Create neural network for policy"""
+        class PolicyNetwork(nn.Module):
+            def __init__(self, state_size, action_size):
+                super(PolicyNetwork, self).__init__()
+                self.fc1 = nn.Linear(state_size, 128)
+                self.fc2 = nn.Linear(128, 64)
+                self.fc3 = nn.Linear(64, action_size)
+                self.tanh = nn.Tanh()
+
+            def forward(self, x):
+                x = torch.relu(self.fc1(x))
+                x = torch.relu(self.fc2(x))
+                x = self.tanh(self.fc3(x))  # Output in [-1, 1] range
+                return x
+
+        return PolicyNetwork(self.state_size, self.action_size)
+
+    def scan_callback(self, msg):
+        """Process laser scan and update state"""
+        ranges = np.array(msg.ranges)
+        ranges = np.nan_to_num(ranges, nan=10.0, posinf=10.0, neginf=0.0)
+        ranges = np.clip(ranges, 0.0, 10.0) / 10.0
+
+        self.previous_state = self.current_state
+        self.current_state = ranges
+
+    def calculate_reward(self, current_scan, action):
+        """Calculate reward based on current state and action"""
+        # Example reward function: avoid obstacles and move forward
+        min_distance = np.min(current_scan)
+
+        # Reward for moving forward when safe
+        forward_reward = 0.0
+        if action[0] > 0.3 and min_distance > 0.5:  # Moving forward safely
+            forward_reward = 0.1
+
+        # Penalty for being close to obstacles
+        obstacle_penalty = 0.0
+        if min_distance < 0.3:
+            obstacle_penalty = -1.0
+        elif min_distance < 0.5:
+            obstacle_penalty = -0.3
+
+        # Penalty for turning too much when not needed
+        turn_penalty = -0.01 * abs(action[1])
+
+        total_reward = forward_reward + obstacle_penalty + turn_penalty
+        return total_reward
+
+    def learning_step(self):
+        """Perform one step of learning"""
+        if (self.current_state is not None and
+            self.previous_state is not None):
+
+            # Convert to torch tensors
+            state_tensor = torch.FloatTensor(self.previous_state).unsqueeze(0)
+
+            # Get action from policy
+            with torch.no_grad():
+                action_tensor = self.policy_network(state_tensor)
+                action = action_tensor.numpy()[0]
+
+            # Calculate reward
+            reward = self.calculate_reward(self.current_state, action)
+
+            # Publish reward for monitoring
+            reward_msg = Float32()
+            reward_msg.data = reward
+            self.reward_pub.publish(reward_msg)
+
+            # Prepare for training (this is a simplified example)
+            # In a real implementation, you would store experiences
+            # and train on batches
+            self.train_step(self.previous_state, action, reward)
+
+            # Publish action to robot
+            self.publish_action(action)
+
+            self.episode_step += 1
+
+            # Reset if episode is done
+            if self.episode_step >= self.max_episode_steps:
+                self.episode_step = 0
+
+    def train_step(self, state, action, reward):
+        """Perform one training step"""
+        # This is a simplified example
+        # In practice, you would implement proper RL algorithms
+        # like DQN, PPO, or A2C
+
+        # Convert to tensors
+        state_tensor = torch.FloatTensor(state).unsqueeze(0)
+        action_tensor = torch.FloatTensor(action).unsqueeze(0)
+        reward_tensor = torch.FloatTensor([reward])
+
+        # Simple policy gradient update (conceptual)
+        self.optimizer.zero_grad()
+
+        # Get log probability of action (simplified)
+        predicted_action = self.policy_network(state_tensor)
+
+        # Calculate loss (simplified - real implementation would be more complex)
+        loss = -torch.mean(reward_tensor * torch.sum(
+            (predicted_action - action_tensor) ** 2, dim=1))
+
+        loss.backward()
+        self.optimizer.step()
+
+    def publish_action(self, action):
+        """Publish action to robot"""
+        msg = Twist()
+        msg.linear.x = float(action[0] * 0.5)  # Scale linear velocity
+        msg.angular.z = float(action[1] * 1.0)  # Scale angular velocity
+        self.cmd_pub.publish(msg)
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = RLAgentNode()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+## Computer Vision Integration
+
+### Image Processing Node
+
+```python
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge
+import cv2
+import numpy as np
+from geometry_msgs.msg import Twist
+from std_msgs.msg import String
+
+class VisionNavigationNode(Node):
+    def __init__(self):
+        super().__init__('vision_navigation_node')
+
+        # Initialize OpenCV bridge
+        self.bridge = CvBridge()
+
+        # Subscribers and publishers
+        self.image_sub = self.create_subscription(
+            Image, 'camera/image_raw', self.image_callback, 10)
+        self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
+        self.vision_pub = self.create_publisher(String, 'vision_output', 10)
+
+        # Processing timer
+        self.process_timer = self.create_timer(0.1, self.process_vision)
+
+        # Store latest image
+        self.latest_image = None
+        self.processed_result = None
+
+    def image_callback(self, msg):
+        """Process incoming image"""
+        try:
+            # Convert ROS Image message to OpenCV image
+            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+
+            # Store for processing
+            self.latest_image = cv_image
+
+        except Exception as e:
+            self.get_logger().error(f'Image conversion failed: {e}')
+
+    def process_vision(self):
+        """Process vision data and make navigation decisions"""
+        if self.latest_image is not None:
+            # Example: Simple color-based navigation
+            # Detect blue objects (could represent targets)
+            hsv = cv2.cvtColor(self.latest_image, cv2.COLOR_BGR2HSV)
+
+            # Define range for blue color
+            lower_blue = np.array([100, 50, 50])
+            upper_blue = np.array([130, 255, 255])
+
+            # Create mask for blue objects
+            mask = cv2.inRange(hsv, lower_blue, upper_blue)
+
+            # Find contours of blue objects
+            contours, _ = cv2.findContours(
+                mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            if contours:
+                # Find the largest contour
+                largest_contour = max(contours, key=cv2.contourArea)
+
+                # Get center of contour
+                M = cv2.moments(largest_contour)
+                if M["m00"] != 0:
+                    cx = int(M["m10"] / M["m00"])
+                    cy = int(M["m01"] / M["m00"])
+
+                    # Calculate steering based on object position
+                    image_center = self.latest_image.shape[1] // 2
+                    error = cx - image_center
+
+                    # Convert to angular velocity
+                    angular_vel = -error * 0.005  # Scale factor
+                    linear_vel = 0.3  # Move forward at constant speed
+
+                    # Publish navigation command
+                    self.publish_navigation_command(linear_vel, angular_vel)
+
+                    # Publish vision result
+                    result_msg = String()
+                    result_msg.data = f"Target detected at ({cx}, {cy})"
+                    self.vision_pub.publish(result_msg)
+                else:
+                    # No clear target, stop or search
+                    self.publish_navigation_command(0.0, 0.2)  # Turn slowly
+            else:
+                # No target found, search
+                self.publish_navigation_command(0.1, 0.3)  # Move forward and turn
+
+    def publish_navigation_command(self, linear, angular):
+        """Publish navigation command"""
+        msg = Twist()
+        msg.linear.x = linear
+        msg.angular.z = angular
+        self.cmd_pub.publish(msg)
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = VisionNavigationNode()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+## Planning and Decision Making
+
+### AI Planning Node
+
+```python
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import PoseStamped, Point
+from nav_msgs.msg import OccupancyGrid
+from std_msgs.msg import String
+import numpy as np
+import heapq
+
+class AIPlanningNode(Node):
+    def __init__(self):
+        super().__init__('ai_planning_node')
+
+        # Subscribers and publishers
+        self.map_sub = self.create_subscription(
+            OccupancyGrid, 'map', self.map_callback, 10)
+        self.goal_sub = self.create_subscription(
+            PoseStamped, 'goal_pose', self.goal_callback, 10)
+        self.plan_pub = self.create_publisher(
+            String, 'planning_status', 10)
+
+        # Store map and goals
+        self.map_data = None
+        self.current_goal = None
+        self.planning_timer = self.create_timer(1.0, self.plan_if_needed)
+
+    def map_callback(self, msg):
+        """Process occupancy grid map"""
+        self.map_data = {
+            'data': np.array(msg.data).reshape(msg.info.height, msg.info.width),
+            'info': msg.info
+        }
+
+    def goal_callback(self, msg):
+        """Receive new goal"""
+        self.current_goal = msg
+        self.get_logger().info(f'New goal received: ({msg.pose.position.x}, {msg.pose.position.y})')
+
+    def plan_if_needed(self):
+        """Plan path if goal is set and map is available"""
+        if self.current_goal is not None and self.map_data is not None:
+            # Convert goal position to map coordinates
+            goal_x = int((self.current_goal.pose.position.x - self.map_data['info'].origin.position.x) /
+                        self.map_data['info'].resolution)
+            goal_y = int((self.current_goal.pose.position.y - self.map_data['info'].origin.position.y) /
+                        self.map_data['info'].resolution)
+
+            # Get current position (simplified - in real system, get from TF or odometry)
+            current_x, current_y = 50, 50  # Example starting position
+
+            # Plan path using A* algorithm
+            path = self.a_star_plan(current_x, current_y, goal_x, goal_y)
+
+            if path:
+                self.get_logger().info(f'Path found with {len(path)} waypoints')
+                # In a real system, you would publish the path to a path follower
+            else:
+                self.get_logger().warn('No path found to goal')
+
+    def a_star_plan(self, start_x, start_y, goal_x, goal_y):
+        """A* path planning algorithm"""
+        if (start_x < 0 or start_x >= self.map_data['info'].width or
+            start_y < 0 or start_y >= self.map_data['info'].height or
+            goal_x < 0 or goal_x >= self.map_data['info'].width or
+            goal_y < 0 or goal_y >= self.map_data['info'].height):
+            return None
+
+        # Check if start or goal is occupied
+        if (self.map_data['data'][start_y, start_x] > 50 or  # Occupied threshold
+            self.map_data['data'][goal_y, goal_x] > 50):
+            return None
+
+        # A* algorithm implementation
+        open_set = [(0, start_x, start_y)]
+        came_from = {}
+        g_score = {(start_x, start_y): 0}
+        f_score = {(start_x, start_y): self.heuristic(start_x, start_y, goal_x, goal_y)}
+
+        while open_set:
+            current = heapq.heappop(open_set)[1:]
+
+            if current == (goal_x, goal_y):
+                # Reconstruct path
+                path = []
+                while current in came_from:
+                    path.append(current)
+                    current = came_from[current]
+                path.append((start_x, start_y))
+                path.reverse()
+                return path
+
+            for neighbor in self.get_neighbors(current[0], current[1]):
+                if self.map_data['data'][neighbor[1], neighbor[0]] > 50:  # Occupied
+                    continue
+
+                tentative_g_score = g_score[current] + self.distance(current, neighbor)
+
+                if neighbor not in g_score or tentative_g_score < g_score[neighbor]:
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g_score
+                    f_score[neighbor] = tentative_g_score + self.heuristic(neighbor[0], neighbor[1], goal_x, goal_y)
+                    heapq.heappush(open_set, (f_score[neighbor], neighbor[0], neighbor[1]))
+
+        return None  # No path found
+
+    def heuristic(self, x1, y1, x2, y2):
+        """Heuristic function (Manhattan distance)"""
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    def get_neighbors(self, x, y):
+        """Get 8-connected neighbors"""
+        neighbors = []
+        for dx in [-1, 0, 1]:
+            for dy in [-1, 0, 1]:
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = x + dx, y + dy
+                if (0 <= nx < self.map_data['info'].width and
+                    0 <= ny < self.map_data['info'].height):
+                    neighbors.append((nx, ny))
+        return neighbors
+
+    def distance(self, pos1, pos2):
+        """Calculate distance between two positions"""
+        dx = pos1[0] - pos2[0]
+        dy = pos1[1] - pos2[1]
+        return np.sqrt(dx*dx + dy*dy)
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = AIPlanningNode()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+## Model Training Integration
+
+### Training Data Collection Node
+
+```python
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import LaserScan, Image
+from geometry_msgs.msg import Twist
+from cv_bridge import CvBridge
+import numpy as np
+import json
+import os
+from datetime import datetime
+
+class TrainingDataCollectorNode(Node):
+    def __init__(self):
+        super().__init__('training_data_collector')
+
+        # Initialize data collection
+        self.bridge = CvBridge()
+        self.data_buffer = []
+        self.max_buffer_size = 1000
+
+        # Create directory for data
+        self.data_dir = 'training_data'
+        os.makedirs(self.data_dir, exist_ok=True)
+
+        # Subscribers
+        self.scan_sub = self.create_subscription(
+            LaserScan, 'scan', self.scan_callback, 10)
+        self.image_sub = self.create_subscription(
+            Image, 'camera/image_raw', self.image_callback, 10)
+        self.cmd_sub = self.create_subscription(
+            Twist, 'cmd_vel', self.command_callback, 10)
+
+        # Store latest data
+        self.latest_scan = None
+        self.latest_image = None
+        self.latest_command = None
+
+        # Data collection timer
+        self.collection_timer = self.create_timer(0.2, self.collect_data)
+
+        # Data saving timer
+        self.save_timer = self.create_timer(5.0, self.save_data)
+
+    def scan_callback(self, msg):
+        """Store laser scan data"""
+        self.latest_scan = {
+            'ranges': list(msg.ranges),
+            'intensities': list(msg.intensities),
+            'header': {
+                'stamp': msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+                'frame_id': msg.header.frame_id
+            }
+        }
+
+    def image_callback(self, msg):
+        """Store image data"""
+        try:
+            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            # Store a simplified version of the image (downsampled)
+            small_image = cv2.resize(cv_image, (64, 64))
+            self.latest_image = {
+                'image': small_image.tolist(),  # Convert to list for JSON serialization
+                'header': {
+                    'stamp': msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+                    'frame_id': msg.header.frame_id
+                }
+            }
+        except Exception as e:
+            self.get_logger().error(f'Image processing failed: {e}')
+
+    def command_callback(self, msg):
+        """Store command data"""
+        self.latest_command = {
+            'linear_x': msg.linear.x,
+            'angular_z': msg.angular.z,
+            'timestamp': self.get_clock().now().nanoseconds * 1e-9
+        }
+
+    def collect_data(self):
+        """Collect synchronized data samples"""
+        if (self.latest_scan is not None and
+            self.latest_image is not None and
+            self.latest_command is not None):
+
+            # Create data sample
+            sample = {
+                'sensor_data': {
+                    'scan': self.latest_scan,
+                    'image': self.latest_image
+                },
+                'action': self.latest_command,
+                'timestamp': datetime.now().isoformat()
+            }
+
+            # Add to buffer
+            self.data_buffer.append(sample)
+
+            # Keep buffer size manageable
+            if len(self.data_buffer) > self.max_buffer_size:
+                self.data_buffer.pop(0)
+
+            self.latest_scan = None
+            self.latest_image = None
+            self.latest_command = None
+
+    def save_data(self):
+        """Save collected data to file"""
+        if self.data_buffer:
+            filename = f"{self.data_dir}/training_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            with open(filename, 'w') as f:
+                json.dump(self.data_buffer, f)
+
+            self.get_logger().info(f'Saved {len(self.data_buffer)} samples to {filename}')
+            self.data_buffer.clear()  # Clear buffer after saving
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = TrainingDataCollectorNode()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        # Save remaining data on shutdown
+        node.save_data()
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+## Best Practices for AI-ROS Integration
+
+### 1. Performance Considerations
+
+```python
+# Use threading for heavy AI computations
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
+class OptimizedAINode(Node):
+    def __init__(self):
+        super().__init__('optimized_ai_node')
+
+        # Use thread pool for AI inference
+        self.executor = ThreadPoolExecutor(max_workers=2)
+
+        # Throttle AI processing to avoid overwhelming the system
+        self.ai_process_rate = 10  # Hz
+        self.ai_timer = self.create_timer(
+            1.0/self.ai_process_rate, self.throttled_ai_process)
+
+    def throttled_ai_process(self):
+        """Process AI tasks with rate limiting"""
+        # Submit AI task to thread pool
+        future = self.executor.submit(self.run_ai_inference)
+        # Handle result asynchronously
+        future.add_done_callback(self.ai_result_callback)
+
+    def ai_result_callback(self, future):
+        """Handle AI inference results"""
+        try:
+            result = future.result()
+            # Process result
+            self.publish_ai_output(result)
+        except Exception as e:
+            self.get_logger().error(f'AI inference failed: {e}')
+```
+
+### 2. Error Handling and Fallbacks
+
+```python
+class RobustAINode(Node):
+    def __init__(self):
+        super().__init__('robust_ai_node')
+
+        # Initialize with fallback behavior
+        self.ai_active = True
+        self.fallback_behavior = "stop"  # or "wander", "return_home", etc.
+
+    def run_ai_inference(self):
+        """Run AI inference with error handling"""
+        try:
+            if self.ai_model is not None:
+                result = self.ai_model.predict(self.current_sensor_data)
+                return result
+            else:
+                self.get_logger().warn('AI model not loaded, using fallback')
+                return self.fallback_action()
+        except Exception as e:
+            self.get_logger().error(f'AI inference error: {e}')
+            return self.fallback_action()
+
+    def fallback_action(self):
+        """Define safe fallback behavior"""
+        if self.fallback_behavior == "stop":
+            return [0.0, 0.0]  # Stop
+        elif self.fallback_behavior == "wander":
+            import random
+            return [0.2, random.uniform(-0.5, 0.5)]  # Gentle random movement
+```
+
+## Summary
+
+This chapter covered the integration of AI agents with ROS 2 using Python. We explored various approaches to connect machine learning models, reinforcement learning agents, computer vision systems, and planning algorithms with ROS 2's communication infrastructure. Key takeaways include:
+
+1. **Model Integration**: How to load and run AI models within ROS 2 nodes
+2. **Data Flow**: Managing sensor data input and AI decision output
+3. **Real-time Processing**: Techniques for handling real-time AI inference
+4. **Safety Considerations**: Implementing fallback behaviors and error handling
+5. **Training Integration**: Collecting data for model training
+
+The integration of AI with ROS 2 enables powerful robotic applications that can perceive, reason, and act intelligently in complex environments. This foundation will be essential as we move to more advanced topics in the subsequent modules of this book.
+
+## Next Steps
+
+In Module 2, we'll explore how to simulate these AI-powered robots in digital twin environments using Gazebo and Unity, allowing us to test and refine our AI algorithms in safe, controlled virtual environments before deploying them on physical robots.

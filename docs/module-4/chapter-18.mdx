@@ -1,0 +1,1166 @@
+---
+sidebar_position: 18
+title: 'Chapter 18: LLM-Based Cognitive Planning'
+---
+
+# LLM-Based Cognitive Planning
+
+## Overview
+
+Large Language Models (LLMs) have emerged as powerful tools for cognitive planning in robotics, enabling humanoid robots to understand complex natural language commands and generate sophisticated multi-step plans. This chapter explores how LLMs can serve as cognitive planners, bridging high-level human instructions with low-level robot actions through reasoning, planning, and adaptation.
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+- Understand how LLMs function as cognitive planners for robotics
+- Implement LLM-based planning systems for humanoid robots
+- Design effective prompting strategies for robotic planning
+- Handle plan execution, monitoring, and adaptation
+- Evaluate and optimize LLM-based planning performance
+
+## Introduction to LLM-Based Cognitive Planning
+
+### Cognitive Planning in Robotics
+
+Cognitive planning involves high-level reasoning to transform goals into executable action sequences. For humanoid robots, this includes:
+
+1. **Goal Interpretation**: Understanding natural language commands
+2. **World Modeling**: Creating internal representations of the environment
+3. **Plan Generation**: Creating multi-step action sequences
+4. **Plan Execution**: Coordinating low-level controllers
+5. **Plan Adaptation**: Adjusting plans based on feedback
+
+### LLMs as Cognitive Planners
+
+LLMs excel at cognitive planning due to their:
+- **Commonsense Reasoning**: Understanding of physical and social world
+- **Language Understanding**: Natural interpretation of commands
+- **Sequential Reasoning**: Ability to generate step-by-step plans
+- **Knowledge Integration**: Access to vast world knowledge
+- **Adaptability**: Ability to handle novel situations
+
+```
+┌─────────────────┐    ┌─────────────────┐    └─────────────────┐
+│   Natural       │    │   LLM Cognitive │    │   Action        │
+│   Language      │───▶│   Planner       │───▶│   Execution     │
+│   Command       │    │   (Reasoning,   │    │   System        │
+│   ("Clean the   │    │   Planning,     │    │   (Navigation,  │
+│   kitchen and   │    │   Knowledge)    │    │   Manipulation) │
+│   then set      │    │                 │    │                 │
+│   the table")   │    │                 │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────┐    └─────────────────┐    ┌─────────────────┐
+│   Context       │    │   Plan          │    │   Robot         │
+│   (Environment  │    │   (Sequence of  │    │   State         │
+│   State,        │    │   Actions with  │    │   (Position,    │
+│   Capabilities) │    │   Justifications)│    │   Orientation, │
+│                 │    │                 │    │   Gripper, etc.)│
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+## LLM Planning Architecture
+
+### Planning System Components
+
+```python
+import openai
+import json
+import re
+import time
+from typing import Dict, List, Optional, Any
+from dataclasses import dataclass
+from enum import Enum
+
+@dataclass
+class PlanStep:
+    """Represents a single step in a robot plan"""
+    step_id: int
+    action: str
+    parameters: Dict[str, Any]
+    description: str
+    preconditions: List[str]
+    effects: List[str]
+    success_criteria: List[str]
+
+@dataclass
+class Plan:
+    """Complete plan for robot execution"""
+    plan_id: str
+    goal: str
+    steps: List[PlanStep]
+    estimated_duration: float
+    confidence: float
+
+class PlanStatus(Enum):
+    """Status of plan execution"""
+    PENDING = "pending"
+    EXECUTING = "executing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    ADAPTED = "adapted"
+
+class LLMBasedPlanner:
+    def __init__(self, model_name="gpt-4", api_key=None):
+        """
+        Initialize LLM-based cognitive planner
+
+        Args:
+            model_name: Name of the LLM model to use
+            api_key: API key for the LLM service
+        """
+        self.model_name = model_name
+        self.client = openai.OpenAI(api_key=api_key) if api_key else None
+
+        # Robot capabilities and constraints
+        self.robot_capabilities = {
+            "navigation": {
+                "max_speed": 0.5,
+                "turn_rate": 0.8,
+                "indoor_only": True
+            },
+            "manipulation": {
+                "max_weight": 2.0,
+                "reach_distance": 1.0,
+                "gripper_types": ["precision", "power"]
+            },
+            "sensors": ["camera", "lidar", "imu", "force_torque"],
+            "actuators": ["wheels", "arm_joints", "head_pan_tilt"]
+        }
+
+        # Environment knowledge
+        self.environment_knowledge = {}
+        self.object_knowledge = {}
+
+        # Plan execution tracking
+        self.active_plans = {}
+        self.plan_history = []
+
+    def create_plan(self, goal: str, context: Dict[str, Any] = None) -> Optional[Plan]:
+        """
+        Create a plan for achieving the specified goal using LLM
+
+        Args:
+            goal: Natural language description of the goal
+            context: Additional context information
+
+        Returns:
+            Plan object or None if planning fails
+        """
+        if context is None:
+            context = {}
+
+        # Construct the planning prompt
+        prompt = self._construct_planning_prompt(goal, context)
+
+        try:
+            # Generate plan using LLM
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "system", "content": self._get_system_prompt()},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=2000,
+                response_format={"type": "json_object"}
+            )
+
+            # Parse the response
+            plan_data = json.loads(response.choices[0].message.content)
+
+            # Convert to Plan object
+            plan = self._parse_plan_response(plan_data, goal)
+
+            # Store in active plans
+            plan.plan_id = f"plan_{int(time.time())}"
+            self.active_plans[plan.plan_id] = plan
+
+            return plan
+
+        except Exception as e:
+            print(f"Plan creation failed: {e}")
+            return None
+
+    def _construct_planning_prompt(self, goal: str, context: Dict[str, Any]) -> str:
+        """Construct the prompt for LLM-based planning"""
+        prompt = f"""
+        You are an advanced cognitive planner for a humanoid robot. Your task is to create a detailed step-by-step plan to achieve the following goal:
+
+        GOAL: {goal}
+
+        ROBOT CAPABILITIES:
+        - Navigation: Can move at max 0.5 m/s, turn at 0.8 rad/s, indoor navigation only
+        - Manipulation: Can lift max 2.0 kg, reach distance 1.0 m, precision and power grippers available
+        - Sensors: Camera, LIDAR, IMU, force/torque sensors
+        - Actuators: Wheels, arm joints, head pan/tilt
+
+        CURRENT CONTEXT:
+        {json.dumps(context, indent=2)}
+
+        Please generate a detailed plan with the following structure:
+        {{
+            "goal": "original goal",
+            "estimated_duration": float,
+            "confidence": float,
+            "steps": [
+                {{
+                    "step_id": int,
+                    "action": "action_name",
+                    "parameters": {{"param1": "value1", ...}},
+                    "description": "human-readable description",
+                    "preconditions": ["condition1", "condition2", ...],
+                    "effects": ["effect1", "effect2", ...],
+                    "success_criteria": ["criterion1", "criterion2", ...]
+                }}
+            ]
+        }}
+
+        Actions should be from this list: move_to, pick_object, place_object, look_at, grasp, release, speak, wait, navigate, manipulate.
+
+        Ensure the plan is safe, feasible given robot capabilities, and accounts for the current context.
+        """
+
+        return prompt
+
+    def _get_system_prompt(self) -> str:
+        """Get the system prompt for the LLM"""
+        return """
+        You are an expert cognitive planner for humanoid robots. You generate detailed, executable plans that transform high-level goals into specific robot actions. Consider:
+
+        1. Robot capabilities and limitations
+        2. Physical constraints and safety
+        3. Environmental context
+        4. Logical sequence of actions
+        5. Feasibility and safety of each step
+        6. Precondition checking before actions
+        7. Effect tracking for state management
+
+        Always provide structured JSON output with the exact format specified in the user prompt.
+        """
+
+    def _parse_plan_response(self, plan_data: Dict, original_goal: str) -> Plan:
+        """Parse LLM response into Plan object"""
+        steps = []
+        for step_data in plan_data.get("steps", []):
+            step = PlanStep(
+                step_id=step_data["step_id"],
+                action=step_data["action"],
+                parameters=step_data.get("parameters", {}),
+                description=step_data["description"],
+                preconditions=step_data.get("preconditions", []),
+                effects=step_data.get("effects", []),
+                success_criteria=step_data.get("success_criteria", [])
+            )
+            steps.append(step)
+
+        plan = Plan(
+            plan_id="",
+            goal=original_goal,
+            steps=steps,
+            estimated_duration=plan_data.get("estimated_duration", 0.0),
+            confidence=plan_data.get("confidence", 0.5)
+        )
+
+        return plan
+```
+
+## Context-Aware Planning
+
+### Environment and State Modeling
+
+```python
+class EnvironmentModel:
+    def __init__(self):
+        self.objects = {}
+        self.locations = {}
+        self.spatial_relations = {}
+        self.dynamics = {}
+        self.update_timestamp = time.time()
+
+    def update_from_perception(self, perception_data: Dict):
+        """Update environment model from perception system"""
+        # Update objects
+        for obj_data in perception_data.get("objects", []):
+            obj_id = obj_data["id"]
+            self.objects[obj_id] = {
+                "type": obj_data["type"],
+                "position": obj_data["position"],
+                "size": obj_data["size"],
+                "properties": obj_data.get("properties", {}),
+                "last_seen": time.time()
+            }
+
+        # Update locations
+        for location_data in perception_data.get("locations", []):
+            loc_id = location_data["id"]
+            self.locations[loc_id] = {
+                "name": location_data["name"],
+                "position": location_data["position"],
+                "type": location_data["type"],
+                "accessible": location_data.get("accessible", True)
+            }
+
+        # Update spatial relations
+        self.spatial_relations = self._compute_spatial_relations()
+
+    def _compute_spatial_relations(self) -> Dict:
+        """Compute spatial relations between objects and locations"""
+        relations = {}
+
+        for obj_id, obj_data in self.objects.items():
+            for loc_id, loc_data in self.locations.items():
+                distance = self._calculate_distance(
+                    obj_data["position"], loc_data["position"]
+                )
+
+                relation = {
+                    "distance": distance,
+                    "accessible": distance < 2.0,  # Within robot reach
+                    "relative_position": self._get_relative_position(
+                        obj_data["position"], loc_data["position"]
+                    )
+                }
+
+                if obj_id not in relations:
+                    relations[obj_id] = {}
+                relations[obj_id][loc_id] = relation
+
+        return relations
+
+    def _calculate_distance(self, pos1: List[float], pos2: List[float]) -> float:
+        """Calculate Euclidean distance between two positions"""
+        return sum((a - b) ** 2 for a, b in zip(pos1, pos2)) ** 0.5
+
+    def _get_relative_position(self, pos1: List[float], pos2: List[float]) -> str:
+        """Get relative position description"""
+        dx = pos2[0] - pos1[0]
+        dy = pos2[1] - pos1[1]
+
+        if abs(dx) > abs(dy):
+            return "east" if dx > 0 else "west"
+        else:
+            return "north" if dy > 0 else "south"
+
+class ContextManager:
+    def __init__(self):
+        self.environment = EnvironmentModel()
+        self.robot_state = {}
+        self.task_history = []
+        self.user_preferences = {}
+        self.current_plan = None
+
+    def get_context_for_planning(self) -> Dict:
+        """Get complete context for planning"""
+        return {
+            "environment": {
+                "objects": self.environment.objects,
+                "locations": self.environment.locations,
+                "spatial_relations": self.environment.spatial_relations
+            },
+            "robot_state": self.robot_state,
+            "task_history": self.task_history[-10:],  # Last 10 tasks
+            "current_plan": self.current_plan,
+            "time_of_day": self._get_time_of_day(),
+            "user_preferences": self.user_preferences
+        }
+
+    def _get_time_of_day(self) -> str:
+        """Get current time of day for context"""
+        current_hour = time.localtime().tm_hour
+        if 5 <= current_hour < 12:
+            return "morning"
+        elif 12 <= current_hour < 17:
+            return "afternoon"
+        elif 17 <= current_hour < 21:
+            return "evening"
+        else:
+            return "night"
+```
+
+## Plan Execution and Monitoring
+
+### Plan Execution System
+
+```python
+import asyncio
+from typing import Callable, Awaitable
+
+class PlanExecutor:
+    def __init__(self, robot_interface=None):
+        self.robot_interface = robot_interface
+        self.current_plan = None
+        self.current_step = 0
+        self.execution_status = PlanStatus.PENDING
+        self.step_callbacks = []
+        self.plan_callbacks = []
+
+    async def execute_plan(self, plan: Plan) -> PlanStatus:
+        """Execute a complete plan step by step"""
+        self.current_plan = plan
+        self.current_step = 0
+        self.execution_status = PlanStatus.EXECUTING
+
+        print(f"Starting execution of plan: {plan.goal}")
+
+        # Execute each step
+        for step_idx, step in enumerate(plan.steps):
+            self.current_step = step_idx
+
+            # Check preconditions
+            if not await self._check_preconditions(step):
+                print(f"Preconditions failed for step {step_idx}: {step.description}")
+                self.execution_status = PlanStatus.FAILED
+                break
+
+            # Execute the step
+            success = await self._execute_step(step)
+
+            if not success:
+                print(f"Step {step_idx} failed: {step.description}")
+                self.execution_status = PlanStatus.FAILED
+                break
+
+            # Check success criteria
+            if not await self._check_success_criteria(step):
+                print(f"Success criteria not met for step {step_idx}")
+                self.execution_status = PlanStatus.FAILED
+                break
+
+            # Notify callbacks
+            for callback in self.step_callbacks:
+                await callback(step_idx, step, success)
+
+        # Final status
+        if self.execution_status == PlanStatus.EXECUTING:
+            self.execution_status = PlanStatus.COMPLETED
+            print(f"Plan completed successfully: {plan.goal}")
+        else:
+            print(f"Plan execution failed: {plan.goal}")
+
+        # Notify plan completion
+        for callback in self.plan_callbacks:
+            await callback(self.execution_status, plan)
+
+        return self.execution_status
+
+    async def _check_preconditions(self, step: PlanStep) -> bool:
+        """Check if preconditions for a step are met"""
+        # This would interface with the robot's state system
+        # For now, we'll assume most preconditions are met
+        for precondition in step.preconditions:
+            if not await self._evaluate_precondition(precondition):
+                return False
+        return True
+
+    async def _evaluate_precondition(self, precondition: str) -> bool:
+        """Evaluate a specific precondition"""
+        # This would check actual robot state
+        # For demonstration, return True for most cases
+        if precondition.startswith("robot_at_"):
+            # Check if robot is at required location
+            return True  # Simplified
+        elif precondition.startswith("object_"):
+            # Check if object is available
+            return True  # Simplified
+        else:
+            return True
+
+    async def _execute_step(self, step: PlanStep) -> bool:
+        """Execute a single plan step"""
+        print(f"Executing step: {step.description}")
+
+        if not self.robot_interface:
+            # Simulate execution
+            print(f"Simulating action: {step.action} with parameters {step.parameters}")
+            await asyncio.sleep(0.5)  # Simulate execution time
+            return True
+
+        try:
+            # Execute based on action type
+            if step.action == "move_to":
+                return await self._execute_move_to(step.parameters)
+            elif step.action == "pick_object":
+                return await self._execute_pick_object(step.parameters)
+            elif step.action == "place_object":
+                return await self._execute_place_object(step.parameters)
+            elif step.action == "look_at":
+                return await self._execute_look_at(step.parameters)
+            elif step.action == "speak":
+                return await self._execute_speak(step.parameters)
+            elif step.action == "wait":
+                return await self._execute_wait(step.parameters)
+            else:
+                print(f"Unknown action: {step.action}")
+                return False
+        except Exception as e:
+            print(f"Error executing step {step.action}: {e}")
+            return False
+
+    async def _execute_move_to(self, parameters: Dict) -> bool:
+        """Execute move to location action"""
+        location = parameters.get("location", "default")
+        speed = parameters.get("speed", 0.5)
+
+        print(f"Moving to {location} at speed {speed}")
+        # In real implementation: call navigation system
+        await asyncio.sleep(1)  # Simulate movement
+        return True
+
+    async def _execute_pick_object(self, parameters: Dict) -> bool:
+        """Execute pick object action"""
+        object_id = parameters.get("object_id", "")
+        grasp_type = parameters.get("grasp_type", "precision")
+
+        print(f"Picking up {object_id} with {grasp_type} grasp")
+        # In real implementation: call manipulation system
+        await asyncio.sleep(1)  # Simulate manipulation
+        return True
+
+    async def _execute_place_object(self, parameters: Dict) -> bool:
+        """Execute place object action"""
+        location = parameters.get("location", "default")
+        object_id = parameters.get("object_id", "")
+
+        print(f"Placing {object_id} at {location}")
+        # In real implementation: call manipulation system
+        await asyncio.sleep(1)  # Simulate manipulation
+        return True
+
+    async def _execute_look_at(self, parameters: Dict) -> bool:
+        """Execute look at action"""
+        target = parameters.get("target", "")
+
+        print(f"Looking at {target}")
+        # In real implementation: call head/eye control
+        await asyncio.sleep(0.5)  # Simulate head movement
+        return True
+
+    async def _execute_speak(self, parameters: Dict) -> bool:
+        """Execute speak action"""
+        text = parameters.get("text", "")
+
+        print(f"Speaking: {text}")
+        # In real implementation: call text-to-speech
+        await asyncio.sleep(len(text.split()) * 0.1)  # Simulate speech duration
+        return True
+
+    async def _execute_wait(self, parameters: Dict) -> bool:
+        """Execute wait action"""
+        duration = parameters.get("duration", 1.0)
+
+        print(f"Waiting for {duration} seconds")
+        await asyncio.sleep(duration)
+        return True
+
+    async def _check_success_criteria(self, step: PlanStep) -> bool:
+        """Check if success criteria for a step are met"""
+        for criterion in step.success_criteria:
+            if not await self._evaluate_success_criterion(criterion):
+                return False
+        return True
+
+    async def _evaluate_success_criterion(self, criterion: str) -> bool:
+        """Evaluate a specific success criterion"""
+        # This would check actual robot state after action
+        # For demonstration, return True
+        return True
+
+    def add_step_callback(self, callback: Callable[[int, PlanStep, bool], Awaitable[None]]):
+        """Add callback for step execution"""
+        self.step_callbacks.append(callback)
+
+    def add_plan_callback(self, callback: Callable[[PlanStatus, Plan], Awaitable[None]]):
+        """Add callback for plan execution"""
+        self.plan_callbacks.append(callback)
+```
+
+## Plan Adaptation and Learning
+
+### Adaptive Planning System
+
+```python
+class AdaptivePlanner:
+    def __init__(self, base_planner: LLMBasedPlanner):
+        self.base_planner = base_planner
+        self.execution_history = []
+        self.failure_patterns = {}
+        self.adaptation_rules = []
+
+    async def adapt_plan(self, original_plan: Plan, failure_info: Dict) -> Optional[Plan]:
+        """Adapt a plan based on execution failure or environmental changes"""
+        # Record the failure
+        self.execution_history.append({
+            "plan_id": original_plan.plan_id,
+            "goal": original_plan.goal,
+            "failure_info": failure_info,
+            "timestamp": time.time()
+        })
+
+        # Analyze failure pattern
+        failure_pattern = self._analyze_failure_pattern(failure_info)
+
+        # Check for known adaptation rules
+        adaptation_rule = self._find_adaptation_rule(failure_pattern)
+
+        if adaptation_rule:
+            # Apply known adaptation
+            adapted_plan = await self._apply_adaptation_rule(
+                original_plan, adaptation_rule, failure_info
+            )
+        else:
+            # Generate new plan with failure context
+            adapted_plan = await self._generate_adapted_plan(
+                original_plan, failure_info
+            )
+
+        return adapted_plan
+
+    def _analyze_failure_pattern(self, failure_info: Dict) -> str:
+        """Analyze failure to identify pattern"""
+        failure_type = failure_info.get("type", "unknown")
+        failed_step = failure_info.get("step_id", -1)
+        error_message = failure_info.get("error", "")
+
+        # Create a pattern identifier
+        pattern = f"{failure_type}_{failed_step}_{hash(error_message) % 1000}"
+        return pattern
+
+    def _find_adaptation_rule(self, pattern: str) -> Optional[Dict]:
+        """Find existing adaptation rule for pattern"""
+        return self.adaptation_rules.get(pattern)
+
+    async def _apply_adaptation_rule(self, plan: Plan, rule: Dict, failure_info: Dict) -> Plan:
+        """Apply a known adaptation rule to a plan"""
+        # This would modify the plan based on the rule
+        # For demonstration, we'll just return a slightly modified plan
+        adapted_plan = Plan(
+            plan_id=f"{plan.plan_id}_adapted",
+            goal=plan.goal,
+            steps=plan.steps.copy(),
+            estimated_duration=plan.estimated_duration,
+            confidence=plan.confidence * 0.9  # Reduce confidence due to adaptation
+        )
+
+        # Apply specific adaptations based on rule
+        if rule.get("type") == "retry_with_different_approach":
+            # Modify the failed step
+            failed_step_id = failure_info.get("step_id", 0)
+            if 0 <= failed_step_id < len(adapted_plan.steps):
+                step = adapted_plan.steps[failed_step_id]
+                step.description = f"{step.description} (adapted approach)"
+
+        return adapted_plan
+
+    async def _generate_adapted_plan(self, original_plan: Plan, failure_info: Dict) -> Optional[Plan]:
+        """Generate a new adapted plan based on failure information"""
+        # Create context with failure information
+        context = {
+            "original_goal": original_plan.goal,
+            "failed_plan_steps": [step.description for step in original_plan.steps],
+            "failure_info": failure_info,
+            "available_alternatives": self._get_available_alternatives(failure_info)
+        }
+
+        # Generate new plan with failure context
+        adapted_goal = f"{original_plan.goal} (with consideration of previous failure: {failure_info.get('error', 'unknown')})"
+        adapted_plan = self.base_planner.create_plan(adapted_goal, context)
+
+        return adapted_plan
+
+    def _get_available_alternatives(self, failure_info: Dict) -> List[str]:
+        """Get available alternative approaches based on failure"""
+        alternatives = []
+
+        if failure_info.get("type") == "object_not_found":
+            alternatives.append("search_in_different_location")
+            alternatives.append("use_alternative_object")
+        elif failure_info.get("type") == "navigation_failed":
+            alternatives.append("find_alternative_path")
+            alternatives.append("request_assistance")
+        elif failure_info.get("type") == "manipulation_failed":
+            alternatives.append("try_different_grasp")
+            alternatives.append("use_different_gripper")
+        else:
+            alternatives.append("retry_with_adjusted_parameters")
+            alternatives.append("break_down_into_smaller_steps")
+
+        return alternatives
+
+    def learn_from_execution(self, plan: Plan, execution_result: Dict):
+        """Learn from plan execution to improve future planning"""
+        # Update failure patterns
+        if execution_result.get("status") == "failed":
+            failure_info = execution_result.get("failure_info", {})
+            pattern = self._analyze_failure_pattern(failure_info)
+
+            if pattern not in self.failure_patterns:
+                self.failure_patterns[pattern] = {
+                    "count": 0,
+                    "solutions": []
+                }
+
+            self.failure_patterns[pattern]["count"] += 1
+            self.failure_patterns[pattern]["solutions"].append(
+                execution_result.get("solution_applied", "unknown")
+            )
+
+        # Update adaptation rules based on successful adaptations
+        if execution_result.get("adaptation_successful"):
+            self._update_adaptation_rules(execution_result)
+```
+
+## Advanced Planning Techniques
+
+### Hierarchical and Symbolic Planning
+
+```python
+class HierarchicalPlanner:
+    def __init__(self, low_level_planner: LLMBasedPlanner):
+        self.low_level_planner = low_level_planner
+        self.high_level_goals = {}
+        self.symbolic_knowledge = self._initialize_symbolic_knowledge()
+
+    def _initialize_symbolic_knowledge(self) -> Dict:
+        """Initialize symbolic knowledge base"""
+        return {
+            "actions": {
+                "clean": {
+                    "preconditions": ["room_accessible", "cleaning_tools_available"],
+                    "effects": ["room_cleanliness_increased", "objects_organized"],
+                    "subactions": ["sweep_floor", "wipe_surfaces", "organize_items"]
+                },
+                "set_table": {
+                    "preconditions": ["table_available", "tableware_available"],
+                    "effects": ["table_set", "ready_for_dining"],
+                    "subactions": ["place_dishes", "set_cutlery", "add_glassware"]
+                },
+                "greet_guest": {
+                    "preconditions": ["guest_detected", "robot_available"],
+                    "effects": ["guest_acknowledged", "interaction_started"],
+                    "subactions": ["approach_guest", "speak_greeting", "offer_assistance"]
+                }
+            },
+            "objects": {
+                "cleaning_tools": ["broom", "mop", "cloth", "vacuum"],
+                "tableware": ["plates", "cups", "forks", "knives", "spoons"],
+                "furniture": ["table", "chair", "couch", "desk"]
+            },
+            "locations": {
+                "kitchen": ["cooking_area", "dining_area", "storage_area"],
+                "living_room": ["seating_area", "entertainment_area"],
+                "bedroom": ["sleeping_area", "dressing_area"]
+            }
+        }
+
+    def create_hierarchical_plan(self, high_level_goal: str, context: Dict = None) -> Optional[Plan]:
+        """Create a hierarchical plan by decomposing high-level goals"""
+        # Parse the high-level goal
+        goal_components = self._decompose_goal(high_level_goal)
+
+        if not goal_components:
+            return None
+
+        # Create plan steps for each component
+        all_steps = []
+        step_id = 0
+
+        for component in goal_components:
+            component_plan = self.low_level_planner.create_plan(
+                component["goal"],
+                self._update_context_for_component(context, component)
+            )
+
+            if component_plan:
+                # Adjust step IDs
+                for step in component_plan.steps:
+                    step.step_id = step_id
+                    all_steps.append(step)
+                    step_id += 1
+
+        # Create the overall plan
+        hierarchical_plan = Plan(
+            plan_id=f"hierarchical_{int(time.time())}",
+            goal=high_level_goal,
+            steps=all_steps,
+            estimated_duration=sum(
+                (step.parameters.get("estimated_duration", 1.0) for step in all_steps),
+                0
+            ),
+            confidence=min((plan.confidence for plan in [component_plan] if component_plan), default=0.5)
+        )
+
+        return hierarchical_plan
+
+    def _decompose_goal(self, goal: str) -> List[Dict]:
+        """Decompose high-level goal into sub-goals"""
+        # This would use more sophisticated NLP and symbolic reasoning
+        # For demonstration, simple decomposition rules
+
+        goal_lower = goal.lower()
+
+        components = []
+
+        if "clean" in goal_lower and "kitchen" in goal_lower:
+            components.extend([
+                {"goal": "navigate to kitchen", "type": "navigation"},
+                {"goal": "find cleaning supplies", "type": "search"},
+                {"goal": "clean kitchen surfaces", "type": "manipulation"},
+                {"goal": "sweep kitchen floor", "type": "manipulation"}
+            ])
+
+        if "set" in goal_lower and "table" in goal_lower:
+            components.extend([
+                {"goal": "navigate to dining area", "type": "navigation"},
+                {"goal": "find tableware", "type": "search"},
+                {"goal": "place plates on table", "type": "manipulation"},
+                {"goal": "set cutlery", "type": "manipulation"}
+            ])
+
+        return components
+
+    def _update_context_for_component(self, context: Dict, component: Dict) -> Dict:
+        """Update context for a specific component"""
+        if context is None:
+            context = {}
+
+        updated_context = context.copy()
+        updated_context["current_subtask"] = component["type"]
+        updated_context["expected_objects"] = self._get_expected_objects(component["goal"])
+
+        return updated_context
+
+    def _get_expected_objects(self, goal: str) -> List[str]:
+        """Get expected objects based on goal"""
+        for action, info in self.symbolic_knowledge["actions"].items():
+            if action in goal.lower():
+                return info.get("subactions", [])
+
+        return []
+```
+
+## Integration with VLA Systems
+
+### VLA Planning Integration
+
+```python
+class VLAPlanningSystem:
+    def __init__(self, llm_planner: LLMBasedPlanner, context_manager: ContextManager):
+        self.llm_planner = llm_planner
+        self.context_manager = context_manager
+        self.plan_executor = PlanExecutor()
+        self.adaptive_planner = AdaptivePlanner(llm_planner)
+        self.hierarchical_planner = HierarchicalPlanner(llm_planner)
+
+        # Setup callbacks
+        self.plan_executor.add_plan_callback(self._handle_plan_completion)
+
+    async def process_command(self, command: str) -> Optional[Plan]:
+        """Process a natural language command and execute plan"""
+        # Get current context
+        context = self.context_manager.get_context_for_planning()
+
+        # Create plan
+        plan = self.llm_planner.create_plan(command, context)
+
+        if not plan:
+            print(f"Failed to create plan for command: {command}")
+            return None
+
+        print(f"Created plan with {len(plan.steps)} steps for: {command}")
+
+        # Execute plan
+        execution_status = await self.plan_executor.execute_plan(plan)
+
+        # Handle execution result
+        if execution_status == PlanStatus.FAILED:
+            # Attempt adaptation
+            failure_info = {
+                "type": "execution_failed",
+                "error": "Plan execution failed",
+                "step_id": self.plan_executor.current_step
+            }
+            adapted_plan = await self.adaptive_planner.adapt_plan(plan, failure_info)
+
+            if adapted_plan:
+                print("Attempting execution with adapted plan")
+                await self.plan_executor.execute_plan(adapted_plan)
+
+        return plan
+
+    def _handle_plan_completion(self, status: PlanStatus, plan: Plan):
+        """Handle plan completion and update context"""
+        # Update task history
+        self.context_manager.task_history.append({
+            "goal": plan.goal,
+            "status": status.value,
+            "steps_completed": len(plan.steps),
+            "timestamp": time.time()
+        })
+
+        # Learn from execution
+        execution_result = {
+            "status": status.value,
+            "plan_id": plan.plan_id,
+            "original_goal": plan.goal
+        }
+
+        if status == PlanStatus.FAILED:
+            execution_result["failure_info"] = {"type": "execution_failed"}
+
+        self.adaptive_planner.learn_from_execution(plan, execution_result)
+
+    def handle_perception_update(self, perception_data: Dict):
+        """Handle perception updates and update environment model"""
+        self.context_manager.environment.update_from_perception(perception_data)
+
+    def get_system_status(self) -> Dict:
+        """Get current system status"""
+        return {
+            "active_plan": self.plan_executor.current_plan,
+            "current_step": self.plan_executor.current_step,
+            "execution_status": self.plan_executor.execution_status.value,
+            "context_objects": list(self.context_manager.environment.objects.keys()),
+            "context_locations": list(self.context_manager.environment.locations.keys())
+        }
+```
+
+## Prompt Engineering for Robotics
+
+### Effective Prompting Strategies
+
+```python
+class RobotPlanningPrompter:
+    def __init__(self):
+        self.prompt_templates = self._initialize_prompt_templates()
+
+    def _initialize_prompt_templates(self) -> Dict[str, str]:
+        """Initialize various prompt templates for different scenarios"""
+        return {
+            "navigation": """
+            Plan a navigation task for a humanoid robot. Consider:
+            - Current robot position: {current_position}
+            - Target location: {target_location}
+            - Obstacles in environment: {obstacles}
+            - Robot capabilities: {capabilities}
+
+            Generate a plan with steps like: move_to, avoid_obstacle, reach_destination.
+            """,
+
+            "manipulation": """
+            Plan a manipulation task for a humanoid robot. Consider:
+            - Object to manipulate: {object}
+            - Object properties: {object_properties}
+            - Target location: {target_location}
+            - Robot gripper capabilities: {gripper_types}
+
+            Generate a plan with steps like: approach_object, grasp_object, transport, place_object.
+            """,
+
+            "multi_task": """
+            Plan a multi-step task involving both navigation and manipulation. Consider:
+            - Main goal: {main_goal}
+            - Sub-goals: {sub_goals}
+            - Available time: {time_limit}
+            - Environmental constraints: {constraints}
+
+            Generate a hierarchical plan that sequences navigation and manipulation subtasks.
+            """,
+
+            "social_interaction": """
+            Plan a social interaction task for a humanoid robot. Consider:
+            - Interaction goal: {interaction_goal}
+            - User context: {user_context}
+            - Social norms: {social_norms}
+            - Robot personality: {personality}
+
+            Generate a plan that includes navigation, speech, gesture, and appropriate interaction steps.
+            """
+        }
+
+    def create_navigation_prompt(self, current_pos: List[float], target: str,
+                                obstacles: List[Dict], capabilities: Dict) -> str:
+        """Create a navigation-specific prompt"""
+        return self.prompt_templates["navigation"].format(
+            current_position=current_pos,
+            target_location=target,
+            obstacles=obstacles,
+            capabilities=capabilities
+        )
+
+    def create_manipulation_prompt(self, obj: str, obj_props: Dict,
+                                  target_location: str, gripper_types: List[str]) -> str:
+        """Create a manipulation-specific prompt"""
+        return self.prompt_templates["manipulation"].format(
+            object=obj,
+            object_properties=obj_props,
+            target_location=target_location,
+            gripper_types=gripper_types
+        )
+
+    def create_multi_task_prompt(self, main_goal: str, sub_goals: List[str],
+                                time_limit: float, constraints: List[str]) -> str:
+        """Create a multi-task planning prompt"""
+        return self.prompt_templates["multi_task"].format(
+            main_goal=main_goal,
+            sub_goals=sub_goals,
+            time_limit=time_limit,
+            constraints=constraints
+        )
+
+    def create_social_interaction_prompt(self, interaction_goal: str, user_context: Dict,
+                                       social_norms: List[str], personality: str) -> str:
+        """Create a social interaction planning prompt"""
+        return self.prompt_templates["social_interaction"].format(
+            interaction_goal=interaction_goal,
+            user_context=user_context,
+            social_norms=social_norms,
+            personality=personality
+        )
+
+    def apply_chain_of_thought(self, prompt: str) -> str:
+        """Apply chain-of-thought reasoning to the prompt"""
+        cot_prompt = f"""
+        Let's approach this step by step:
+
+        1. First, understand the goal and constraints
+        2. Identify the robot's current state and capabilities
+        3. Consider the environment and potential obstacles
+        4. Plan the sequence of actions needed
+        5. Verify safety and feasibility of each step
+        6. Estimate duration and resource requirements
+
+        Now, generate a detailed plan for: {prompt}
+        """
+        return cot_prompt
+
+    def apply_few_shot_examples(self, prompt: str, examples: List[Dict]) -> str:
+        """Apply few-shot learning examples to the prompt"""
+        examples_text = "\n\nExamples:\n"
+        for i, example in enumerate(examples):
+            examples_text += f"Example {i+1}:\n"
+            examples_text += f"Goal: {example['goal']}\n"
+            examples_text += f"Plan: {example['plan']}\n\n"
+
+        return examples_text + prompt
+```
+
+## Performance Optimization and Caching
+
+### Plan Caching System
+
+```python
+import hashlib
+from datetime import datetime, timedelta
+
+class PlanCache:
+    def __init__(self, max_size=100, ttl_minutes=60):
+        self.max_size = max_size
+        self.ttl_minutes = ttl_minutes
+        self.cache = {}
+        self.access_order = []  # For LRU eviction
+
+    def get_plan(self, goal: str, context: Dict) -> Optional[Plan]:
+        """Get cached plan if available"""
+        cache_key = self._generate_cache_key(goal, context)
+
+        if cache_key in self.cache:
+            cached_item = self.cache[cache_key]
+
+            # Check if cache is still valid
+            if datetime.now() < cached_item["expiry"]:
+                print(f"Retrieved plan from cache for goal: {goal[:50]}...")
+                self._update_access_order(cache_key)
+                return cached_item["plan"]
+            else:
+                # Remove expired cache entry
+                del self.cache[cache_key]
+                if cache_key in self.access_order:
+                    self.access_order.remove(cache_key)
+
+        return None
+
+    def put_plan(self, goal: str, context: Dict, plan: Plan):
+        """Cache a plan"""
+        cache_key = self._generate_cache_key(goal, context)
+
+        # Create expiry time
+        expiry = datetime.now() + timedelta(minutes=self.ttl_minutes)
+
+        # Store in cache
+        self.cache[cache_key] = {
+            "plan": plan,
+            "expiry": expiry,
+            "access_time": datetime.now()
+        }
+
+        self._update_access_order(cache_key)
+
+        # Evict oldest if cache is too large
+        if len(self.cache) > self.max_size:
+            self._evict_lru()
+
+    def _generate_cache_key(self, goal: str, context: Dict) -> str:
+        """Generate a unique cache key for the goal and context"""
+        context_str = json.dumps(context, sort_keys=True)
+        key_str = f"{goal}_{context_str}"
+        return hashlib.md5(key_str.encode()).hexdigest()
+
+    def _update_access_order(self, cache_key: str):
+        """Update access order for LRU"""
+        if cache_key in self.access_order:
+            self.access_order.remove(cache_key)
+        self.access_order.append(cache_key)
+
+    def _evict_lru(self):
+        """Evict the least recently used item"""
+        if self.access_order:
+            oldest_key = self.access_order.pop(0)
+            if oldest_key in self.cache:
+                del self.cache[oldest_key]
+
+class OptimizedLLMPlanner(LLMBasedPlanner):
+    def __init__(self, model_name="gpt-4", api_key=None, use_cache=True):
+        super().__init__(model_name, api_key)
+        self.use_cache = use_cache
+        self.plan_cache = PlanCache() if use_cache else None
+
+    def create_plan(self, goal: str, context: Dict[str, Any] = None) -> Optional[Plan]:
+        """Create a plan with caching optimization"""
+        if context is None:
+            context = {}
+
+        # Check cache first if enabled
+        if self.use_cache:
+            cached_plan = self.plan_cache.get_plan(goal, context)
+            if cached_plan:
+                return cached_plan
+
+        # Generate new plan
+        plan = super().create_plan(goal, context)
+
+        # Cache the plan if successful
+        if plan and self.use_cache:
+            self.plan_cache.put_plan(goal, context, plan)
+
+        return plan
+```
+
+## Summary
+
+LLM-based cognitive planning represents a significant advancement in robotic intelligence, enabling humanoid robots to understand complex natural language commands and generate sophisticated action plans. The key components of effective LLM-based planning systems include:
+
+1. **Context Awareness**: Maintaining rich environment and state models
+2. **Hierarchical Reasoning**: Breaking down complex tasks into manageable subtasks
+3. **Adaptive Planning**: Adjusting plans based on execution feedback
+4. **Performance Optimization**: Caching and efficient prompting strategies
+5. **Safety Integration**: Ensuring plans are safe and feasible
+
+The success of LLM-based cognitive planning in robotics depends on:
+- Effective prompt engineering for robotic tasks
+- Integration with perception and action systems
+- Robust error handling and adaptation mechanisms
+- Continuous learning from execution experiences
+
+In the next chapter, we'll explore multimodal perception systems that enable humanoid robots to integrate visual, auditory, and other sensory information for enhanced environmental understanding and interaction.

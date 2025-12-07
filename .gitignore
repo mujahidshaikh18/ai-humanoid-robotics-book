@@ -1,0 +1,27 @@
+# Gitignore for Docusaurus project with Python, ROS 2, YAML, JSON
+
+# Node.js / Docusaurus
+node_modules/
+.docusaurus/
+build/
+.cache-loader/
+.env
+.env.local
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.log
+
+# ROS 2
+install/
+log/
+build/
+
+# IDEs and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
